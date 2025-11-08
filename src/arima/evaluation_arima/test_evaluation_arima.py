@@ -115,6 +115,61 @@ class TestRollingForecast:
         assert len(predictions) == len(test_series)
         assert len(actuals) == len(test_series)
 
+    @patch("src.arima.evaluation_arima.evaluation_arima._predict_single_step")
+    def test_rolling_forecast_appends_single_observation(
+        self,
+        mock_predict_single_step: MagicMock,
+    ) -> None:
+        """Ensure append receives only one new observation per rolling step."""
+        train_series = pd.Series(
+            [0.01, -0.02, 0.015, -0.01, 0.02],
+            index=pd.date_range("2020-01-01", periods=5, freq="D"),
+        )
+        test_series = pd.Series(
+            [0.01, -0.02, 0.015, -0.01],
+            index=pd.date_range("2020-01-06", periods=4, freq="D"),
+        )
+
+        append_lengths: list[int] = []
+
+        def make_model() -> MagicMock:
+            model = MagicMock()
+            model.forecast.return_value = pd.Series([0.01])
+
+            def append_side_effect(new_data: pd.Series, refit: bool = False) -> MagicMock:
+                append_lengths.append(len(new_data))
+                return model
+
+            model.append.side_effect = append_side_effect
+            return model
+
+        def predict_side_effect(
+            current_train: pd.Series,
+            order: tuple[int, int, int],
+            seasonal_order: tuple[int, int, int, int],
+            fitted_model: MagicMock | None = None,
+        ) -> tuple[float, MagicMock]:
+            if fitted_model is None:
+                model = make_model()
+                return 0.01, model
+            return 0.01, fitted_model
+
+        mock_predict_single_step.side_effect = predict_side_effect
+
+        predictions, actuals = rolling_forecast(
+            train_series,
+            test_series,
+            order=(1, 0, 1),
+            seasonal_order=(0, 0, 0, 12),
+            refit_every=2,
+            verbose=False,
+        )
+
+        assert len(predictions) == len(test_series)
+        assert len(actuals) == len(test_series)
+        # With refit_every=2 and four steps, append should run twice with one obs each
+        assert append_lengths == [1, 1]
+
 
 class TestCalculateMetrics:
     """Tests for calculate_metrics function."""

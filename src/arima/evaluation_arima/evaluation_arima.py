@@ -79,7 +79,7 @@ def rolling_forecast(
     actuals: list[float] = []
     current_train = _ensure_datetime_index(train_series.copy())
     fitted_model: Any | None = None
-    last_refit_data: pd.Series | None = None
+    last_refit_len: int | None = None
 
     for i, (date, actual) in enumerate(test_series.items()):
         # Determine if we should refit the model
@@ -90,15 +90,18 @@ def rolling_forecast(
             pred, fitted_model = _predict_single_step(
                 current_train, order, seasonal_order, fitted_model=None
             )
-            # Store the data used for this refit
-            last_refit_data = _ensure_supported_forecast_index(current_train.copy())
+            # Store length of data seen by the refit
+            last_refit_len = len(_ensure_supported_forecast_index(current_train))
             if verbose:
                 logger.info(f"Model refit at step {i + 1}/{len(test_series)}")
         else:
             # Reuse existing model: append only new observations since last refit
-            if fitted_model is not None and last_refit_data is not None:
+            if fitted_model is not None and last_refit_len is not None:
+                supported_train = _ensure_supported_forecast_index(current_train)
+                # Guard against unexpected shorter series
+                last_refit_len = min(last_refit_len, len(supported_train))
                 # Get only the new data since last refit
-                new_data = _ensure_supported_forecast_index(current_train).iloc[len(last_refit_data):]
+                new_data = supported_train.iloc[last_refit_len:]
                 if len(new_data) > 0:
                     try:
                         # Append new observations without refitting parameters
@@ -106,13 +109,14 @@ def rolling_forecast(
                         fc = updated_model.forecast(steps=1)
                         pred = _extract_forecast_value(fc)
                         fitted_model = updated_model
+                        last_refit_len = len(supported_train)
                     except (ValueError, RuntimeError, AttributeError, TypeError):
                         # If append fails, fall back to full refit
                         logger.debug("Model append failed, falling back to full refit")
                         pred, fitted_model = _predict_single_step(
                             current_train, order, seasonal_order, fitted_model=None
                         )
-                        last_refit_data = _ensure_supported_forecast_index(current_train.copy())
+                        last_refit_len = len(_ensure_supported_forecast_index(current_train))
                 else:
                     # No new data, use existing model
                     fc = fitted_model.forecast(steps=1)
@@ -122,7 +126,7 @@ def rolling_forecast(
                 pred, fitted_model = _predict_single_step(
                     current_train, order, seasonal_order, fitted_model=None
                 )
-                last_refit_data = _ensure_supported_forecast_index(current_train.copy())
+                last_refit_len = len(_ensure_supported_forecast_index(current_train))
 
         predictions.append(pred)
         current_train = _add_point_to_series(current_train, float(actual), date)
