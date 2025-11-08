@@ -12,18 +12,17 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 
-from src.constants import DATA_DIR, DEFAULT_RANDOM_STATE, RESULTS_DIR
+from src.constants import (
+    DEFAULT_RANDOM_STATE,
+    RF_DATASET_COMPLETE_FILE as RF_DATASET_COMPLETE,
+    RF_DATASET_WITHOUT_INSIGHTS_FILE as RF_DATASET_WITHOUT_INSIGHTS,
+    RF_MODELS_DIR,
+    RF_OPTIMIZATION_RESULTS_FILE,
+    RF_TRAINING_RESULTS_FILE,
+)
 from src.utils import get_logger
 
 logger = get_logger(__name__)
-
-# Constants for training
-RF_DATASET_COMPLETE = DATA_DIR / "rf_dataset_complete.csv"
-RF_DATASET_WITHOUT_INSIGHTS = DATA_DIR / "rf_dataset_without_insights.csv"
-RF_RESULTS_DIR = RESULTS_DIR / "random_forest"
-RF_MODELS_DIR = RF_RESULTS_DIR / "models"
-RF_OPTIMIZATION_RESULTS_FILE = RF_RESULTS_DIR / "optimization_results.json"
-RF_TRAINING_RESULTS_FILE = RF_RESULTS_DIR / "training_results.json"
 
 
 def _read_dataset_file(dataset_path: Path) -> pd.DataFrame:

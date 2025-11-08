@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import warnings
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -22,6 +21,13 @@ from src.constants import (
     GARCH_DATA_VISU_PLOTS_DIR,
 )
 from src.utils import get_logger
+
+from .utils import (
+    plot_absolute_returns_panel,
+    plot_returns_panel,
+    plot_squared_returns_panel,
+    prepare_x_axis,
+)
 
 logger = get_logger(__name__)
 
@@ -75,84 +81,18 @@ def save_returns_and_squared_plots(
     axes = fig.subplots(3, 1)
 
     # X-axis: dates if available, otherwise indices
-    x_vals = _prepare_x_axis(dates, len(returns_clean))
+    x_vals = prepare_x_axis(dates, len(returns_clean))
 
     # Plot all three panels
-    _plot_returns_panel(axes[0], x_vals, returns_clean)
-    _plot_absolute_returns_panel(axes[1], x_vals, abs_returns)
-    _plot_squared_returns_panel(axes[2], x_vals, squared_returns, dates is not None)
+    plot_returns_panel(axes[0], x_vals, returns_clean)
+    plot_absolute_returns_panel(axes[1], x_vals, abs_returns)
+    plot_squared_returns_panel(axes[2], x_vals, squared_returns, dates is not None)
 
     fig.suptitle("Visualisation du clustering de volatilité", fontsize=14, fontweight="bold")
 
     canvas.print_png(str(out_path))
     logger.info(f"Saved returns clustering plot: {out_path}")
     return out_path
-
-
-def _prepare_x_axis(dates: np.ndarray | pd.Series | None, length: int) -> np.ndarray:
-    """Prepare x-axis values from dates or indices.
-
-    Args:
-        dates: Optional date array/series
-        length: Length of data
-
-    Returns:
-        X-axis values array
-    """
-    if dates is not None:
-        try:
-            dates_clean = pd.to_datetime(dates)  # type: ignore[arg-type]
-            return np.asarray(dates_clean.values, dtype=object)
-        except Exception:
-            return np.arange(length, dtype=float)
-    return np.arange(length, dtype=float)
-
-
-def _plot_returns_panel(ax: Any, x_vals: np.ndarray, returns: np.ndarray) -> None:
-    """Plot returns panel.
-
-    Args:
-        ax: Matplotlib axis
-        x_vals: X-axis values
-        returns: Returns array
-    """
-    ax.plot(x_vals, returns, linewidth=0.5, alpha=0.7, color="blue")
-    ax.axhline(y=0, color="black", linestyle="--", linewidth=0.5)
-    ax.set_title("Rendements (returns)")
-    ax.set_ylabel("Rendement")
-    ax.grid(True, alpha=0.3)
-
-
-def _plot_absolute_returns_panel(ax: Any, x_vals: np.ndarray, abs_returns: np.ndarray) -> None:
-    """Plot absolute returns panel.
-
-    Args:
-        ax: Matplotlib axis
-        x_vals: X-axis values
-        abs_returns: Absolute returns array
-    """
-    ax.plot(x_vals, abs_returns, linewidth=0.5, alpha=0.7, color="orange")
-    ax.set_title("Rendements absolus (|returns|)")
-    ax.set_ylabel("|Rendement|")
-    ax.grid(True, alpha=0.3)
-
-
-def _plot_squared_returns_panel(
-    ax: Any, x_vals: np.ndarray, squared_returns: np.ndarray, has_dates: bool
-) -> None:
-    """Plot squared returns panel.
-
-    Args:
-        ax: Matplotlib axis
-        x_vals: X-axis values
-        squared_returns: Squared returns array
-        has_dates: Whether dates are available
-    """
-    ax.plot(x_vals, squared_returns, linewidth=0.5, alpha=0.7, color="red")
-    ax.set_title("Rendements au carré (returns²)")
-    ax.set_ylabel("Rendement²")
-    ax.set_xlabel("Date" if has_dates else "Observation")
-    ax.grid(True, alpha=0.3)
 
 
 def plot_returns_autocorrelation(
@@ -224,5 +164,3 @@ def plot_returns_autocorrelation(
     canvas.print_png(str(out_path))
     logger.info(f"Saved returns autocorrelation plot: {out_path}")
     return out_path
-
-

@@ -89,7 +89,15 @@ def test_std_plots_and_ljungbox(
 
 def _assert_distribution_diagnostics_structure(diag: dict[str, float | str | None]) -> None:
     """Assert distribution diagnostics result has correct structure."""
-    required_keys = {"dist", "skewness", "kurtosis", "jarque_bera_stat", "jarque_bera_pvalue", "ks_stat", "ks_pvalue"}
+    required_keys = {
+        "dist",
+        "skewness",
+        "kurtosis",
+        "jarque_bera_stat",
+        "jarque_bera_pvalue",
+        "ks_stat",
+        "ks_pvalue",
+    }
     assert required_keys.issubset(set(diag.keys()))
     assert isinstance(diag["skewness"], float)
     assert isinstance(diag["kurtosis"], float)

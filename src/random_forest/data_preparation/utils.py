@@ -117,7 +117,9 @@ def _get_default_garch_file_path() -> Path:
     Returns:
         Path to default GARCH variance file.
     """
-    return RESULTS_DIR / "rolling" / "garch_variance.csv"
+    from src.constants import GARCH_ROLLING_VARIANCE_FILE
+
+    return GARCH_ROLLING_VARIANCE_FILE
 
 
 def _validate_garch_columns(df: pd.DataFrame) -> None:

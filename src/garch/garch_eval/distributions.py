@@ -21,8 +21,6 @@ The inverse (PPF) is obtained by inverting the piecewise CDF.
 
 from __future__ import annotations
 
-from typing import Tuple
-
 import numpy as np
 
 from src.constants import GARCH_STUDENT_NU_MIN
@@ -31,7 +29,7 @@ from src.utils import get_logger
 logger = get_logger(__name__)
 
 
-def _skewt_abc(nu: float, lam: float) -> Tuple[float, float, float]:
+def _skewt_abc(nu: float, lam: float) -> tuple[float, float, float]:
     """Return Hansen skew-t constants (a, b, c) for nu>2 and |lam|<1.
 
     Parameters
@@ -45,6 +43,7 @@ def _skewt_abc(nu: float, lam: float) -> Tuple[float, float, float]:
     -------
     (a, b, c) : tuple of floats
         Hansen skew-t constants.
+
     """
     if not (nu is not None and float(nu) > GARCH_STUDENT_NU_MIN):
         raise ValueError("Skew-t requires nu > 2.0")
@@ -54,9 +53,7 @@ def _skewt_abc(nu: float, lam: float) -> Tuple[float, float, float]:
     except Exception as exc:  # pragma: no cover - SciPy is required in this project
         raise RuntimeError("SciPy required for skew-t constants") from exc
 
-    c_log = gammaln(0.5 * (nu + 1.0)) - gammaln(0.5 * nu) - 0.5 * (
-        np.log(np.pi) + np.log(nu - 2.0)
-    )
+    c_log = gammaln(0.5 * (nu + 1.0)) - gammaln(0.5 * nu) - 0.5 * (np.log(np.pi) + np.log(nu - 2.0))
     c = float(np.exp(c_log))
     a = float(4.0 * lam * c * (nu - 2.0) / (nu - 1.0))
     b_sq = float(1.0 + 3.0 * lam * lam - a * a)
@@ -82,6 +79,7 @@ def skewt_cdf(z: np.ndarray | float, nu: float, lam: float) -> np.ndarray | floa
     -------
     F : array-like or float
         CDF value(s) at z.
+
     """
     try:
         from scipy.stats import t as student_t  # type: ignore
@@ -126,6 +124,7 @@ def skewt_ppf(q: np.ndarray | float, nu: float, lam: float) -> np.ndarray | floa
     -------
     z_q : array-like or float
         Quantile(s) such that P(Z <= z_q) = q.
+
     """
     try:
         from scipy.stats import t as student_t  # type: ignore
@@ -157,4 +156,3 @@ def skewt_ppf(q: np.ndarray | float, nu: float, lam: float) -> np.ndarray | floa
 
 
 __all__ = ["skewt_cdf", "skewt_ppf"]
-

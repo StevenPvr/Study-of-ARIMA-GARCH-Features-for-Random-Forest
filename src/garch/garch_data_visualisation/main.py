@@ -26,58 +26,14 @@ from src.garch.garch_data_visualisation.plots import (
     plot_returns_autocorrelation,
     save_returns_and_squared_plots,
 )
+from src.garch.garch_data_visualisation.utils import (
+    extract_dates_from_dataframe,
+    prepare_test_dataframe,
+)
 from src.garch.structure_garch.detection import load_garch_dataset
 from src.utils import get_logger
 
 logger = get_logger(__name__)
-
-
-def _prepare_test_dataframe(df: pd.DataFrame) -> pd.DataFrame | None:
-    """Prepare test split DataFrame for returns plotting.
-
-    Args:
-        df: Input DataFrame
-
-    Returns:
-        Test DataFrame or None if data unavailable
-    """
-    if "split" not in df.columns:
-        logger.warning("Dataset missing 'split' column, using all data for returns plot")
-        df_test = df.copy()
-    else:
-        df_test = df.loc[df["split"] == "test"].copy()
-        if len(df_test) == 0:
-            logger.warning("Test split is empty, using all data for returns plot")
-            df_test = df.copy()
-
-    # Ensure weighted_return exists
-    if "weighted_return" not in df_test.columns:
-        if "weighted_log_return" in df_test.columns:
-            log_returns = np.asarray(df_test["weighted_log_return"].values, dtype=float)
-            # Protect against overflow: clip extreme values
-            log_returns_clipped = np.clip(log_returns, -10.0, 10.0)
-            df_test["weighted_return"] = np.expm1(log_returns_clipped)  # type: ignore[index]
-        else:
-            logger.warning(
-                "Neither 'weighted_return' nor 'weighted_log_return' found, skipping returns plot"
-            )
-            return None
-
-    return df_test
-
-
-def _extract_dates_from_dataframe(df_test: pd.DataFrame) -> pd.Series | None:
-    """Extract dates column from DataFrame if available.
-
-    Args:
-        df_test: DataFrame to extract dates from
-
-    Returns:
-        Dates Series or None
-    """
-    if "date" not in df_test.columns:
-        return None
-    return df_test["date"]  # type: ignore[assignment]
 
 
 def _generate_returns_plot(df: pd.DataFrame) -> None:
@@ -86,7 +42,7 @@ def _generate_returns_plot(df: pd.DataFrame) -> None:
     Args:
         df: DataFrame with returns data
     """
-    df_test = _prepare_test_dataframe(df)
+    df_test = prepare_test_dataframe(df)
     if df_test is None or "weighted_return" not in df_test.columns:
         return
 
@@ -98,7 +54,7 @@ def _generate_returns_plot(df: pd.DataFrame) -> None:
         return
 
     try:
-        dates_param = _extract_dates_from_dataframe(df_test)
+        dates_param = extract_dates_from_dataframe(df_test)
         save_returns_and_squared_plots(
             returns_array,
             dates=dates_param,
@@ -116,7 +72,7 @@ def _generate_autocorrelation_plot(df: pd.DataFrame) -> None:
     Args:
         df: DataFrame with returns data
     """
-    df_test = _prepare_test_dataframe(df)
+    df_test = prepare_test_dataframe(df)
     if df_test is None or "weighted_return" not in df_test.columns:
         return
 

@@ -1180,10 +1180,9 @@ def build_ml_dataset(
     # Sort by date
     df_ml = df_ml.sort_values("date").reset_index(drop=True)
 
-    # Save garch_variance dataset in rolling/ directory with only essential columns
+    # Save garch_variance dataset with only essential columns
     # Keep only: date, weighted_closing, weighted_open, log_weighted_return, sigma2_garch, split
-    rolling_dir = RESULTS_DIR / "rolling"
-    rolling_dir.mkdir(parents=True, exist_ok=True)
+    from src.constants import GARCH_ROLLING_VARIANCE_FILE
 
     # Merge with base data to get weighted_closing, weighted_open and split
     df_garch_variance = pd.merge(
@@ -1213,11 +1212,11 @@ def build_ml_dataset(
     # Sort by date
     df_garch_variance = df_garch_variance.sort_values(by="date").reset_index(drop=True)
 
-    # Save to rolling/garch_variance.csv
-    garch_variance_file = rolling_dir / "garch_variance.csv"
-    df_garch_variance.to_csv(garch_variance_file, index=False)
+    # Save to new organized path
+    GARCH_ROLLING_VARIANCE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    df_garch_variance.to_csv(GARCH_ROLLING_VARIANCE_FILE, index=False)
     logger.info(
-        "Saved garch_variance dataset: %s (%d rows)", garch_variance_file, len(df_garch_variance)
+        "Saved garch_variance dataset: %s (%d rows)", GARCH_ROLLING_VARIANCE_FILE, len(df_garch_variance)
     )
 
     logger.info(

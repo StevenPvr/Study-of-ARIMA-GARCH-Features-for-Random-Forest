@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable
 
 import numpy as np
 import pandas as pd
@@ -18,23 +17,12 @@ from src.constants import (
     GARCH_EVAL_VAR_SCATTER_PLOT,
     GARCH_EVAL_VAR_TIMESERIES_PLOT,
     GARCH_EVAL_VAR_VIOLATIONS_TEMPLATE,
-    GARCH_STUDENT_NU_MIN,
     GARCH_VARIANCE_OUTPUTS_FILE,
-    PLOTS_DIR,
 )
-from src.garch.garch_eval.metrics import _load_test_resid_sigma2
-from src.garch.garch_eval.distributions import skewt_ppf
+from src.garch.garch_eval.utils import ensure_parent, load_test_resid_sigma2, var_quantile
 from src.utils import get_logger
 
 logger = get_logger(__name__)
-
-
-def _ensure_parent(path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-
-def _to_numpy(series_like: Iterable[float]) -> np.ndarray:
-    return np.asarray(list(series_like), dtype=float)
 
 
 def plot_variance_timeseries(
@@ -47,7 +35,7 @@ def plot_variance_timeseries(
     import matplotlib.pyplot as plt  # local import to keep import cost low
     import seaborn as sns
 
-    _ensure_parent(output)
+    ensure_parent(output)
     sns.set_style("whitegrid")
     fig, ax = plt.subplots(figsize=GARCH_EVAL_FIGURE_SIZE_DEFAULT)
     ax.plot(dates, e_test**2, label="Réalisé e²", color="#1f77b4", linewidth=1.2)
@@ -71,7 +59,7 @@ def plot_variance_scatter(
     import matplotlib.pyplot as plt
     import seaborn as sns
 
-    _ensure_parent(output)
+    ensure_parent(output)
     y = e_test**2
     x = s2_test
 
@@ -113,7 +101,7 @@ def plot_variance_residuals(
     import matplotlib.pyplot as plt
     import seaborn as sns
 
-    _ensure_parent(output)
+    ensure_parent(output)
     sns.set_style("whitegrid")
     fig, ax = plt.subplots(figsize=GARCH_EVAL_FIGURE_SIZE_RESIDUALS)
     residuals = (e_test**2) - s2_test
@@ -127,23 +115,6 @@ def plot_variance_residuals(
     fig.savefig(output, dpi=150)
     plt.close(fig)
     logger.info("Saved variance residuals plot to: %s", output)
-
-
-def _var_quantile(alpha: float, dist: str, nu: float | None, lambda_skew: float | None = None) -> float:
-    from scipy.stats import norm, t  # type: ignore
-
-    d = dist.lower()
-    if d == "student":
-        if nu is None or nu <= GARCH_STUDENT_NU_MIN:
-            msg = "Student-t requires nu>2 for VaR plots"
-            raise ValueError(msg)
-        return float(t.ppf(alpha, df=float(nu)))
-    if d == "skewt":
-        if nu is None or nu <= GARCH_STUDENT_NU_MIN or lambda_skew is None:
-            msg = "Skew-t requires nu>2 and lambda for VaR plots"
-            raise ValueError(msg)
-        return float(skewt_ppf(alpha, float(nu), float(lambda_skew)))
-    return float(norm.ppf(alpha))
 
 
 def plot_var_violations(
@@ -160,9 +131,9 @@ def plot_var_violations(
     import matplotlib.pyplot as plt
     import seaborn as sns
 
-    _ensure_parent(output)
+    ensure_parent(output)
     sns.set_style("whitegrid")
-    q = _var_quantile(alpha, dist, nu, lambda_skew)
+    q = var_quantile(alpha, dist, nu, lambda_skew)
     var_series = q * np.sqrt(s2_test)
     hits = e_test < var_series
 
@@ -201,12 +172,17 @@ def generate_eval_plots_from_artifacts(
     # Prefer variance outputs CSV for dates/splits if present, else dataset
     try:
         dataset_df = pd.read_csv(GARCH_VARIANCE_OUTPUTS_FILE, parse_dates=["date"])  # type: ignore[arg-type]
-    except Exception:
+    except (FileNotFoundError, pd.errors.EmptyDataError, ValueError):
         dataset_df = pd.read_csv(GARCH_DATASET_FILE, parse_dates=["date"])  # type: ignore[arg-type]
 
     df_sorted = dataset_df.sort_values("date").reset_index(drop=True)
-    e_test, s2_test = _load_test_resid_sigma2(
-        params, df_sorted, model_name=model_name, dist=dist, nu=nu, lambda_skew=lambda_skew
+    e_test, s2_test = load_test_resid_sigma2(
+        params,
+        df_sorted,
+        model_name=model_name,
+        dist=dist,
+        nu=nu,
+        lambda_skew=lambda_skew,
     )
 
     test_mask = (df_sorted["split"].astype(str) == "test").to_numpy()
@@ -221,6 +197,5 @@ def generate_eval_plots_from_artifacts(
 
     # VaR violations plots per alpha
     for a in alphas:
-        file_name = GARCH_EVAL_VAR_VIOLATIONS_TEMPLATE.format(alpha=f"{a:.2f}")
-        output = PLOTS_DIR / file_name
+        output = Path(GARCH_EVAL_VAR_VIOLATIONS_TEMPLATE.format(alpha=f"{a:.2f}"))
         plot_var_violations(dates_test, e_test, s2_test, float(a), dist, nu, output, lambda_skew)

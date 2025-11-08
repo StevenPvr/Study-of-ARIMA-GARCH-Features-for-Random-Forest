@@ -13,46 +13,40 @@ from __future__ import annotations
 import json
 
 import numpy as np
-import pandas as pd
 
 from src.constants import (
     GARCH_CALIBRATION_EPS,
-    GARCH_DATASET_FILE,
     GARCH_EVAL_DEFAULT_ALPHAS,
-    GARCH_EVAL_DEFAULT_SLOPE,
     GARCH_EVAL_EPSILON,
     GARCH_EVAL_HALF,
     GARCH_EVAL_METRICS_FILE,
     GARCH_EVAL_MIN_ALPHA,
-    GARCH_STUDENT_NU_MIN,
-    GARCH_VARIANCE_OUTPUTS_FILE,
 )
-from src.garch.garch_params.estimation import egarch11_variance
-from src.garch.garch_eval.distributions import skewt_ppf
+from src.garch.garch_eval.utils import (
+    chi2_sf,
+    compute_all_metrics,
+    compute_mz_pvalues,
+    filter_test_data,
+    load_dataset_for_metrics,
+    load_test_resid_sigma2,
+)
 from src.utils import get_logger
 
 logger = get_logger(__name__)
-
-
-def _chi2_sf(x: float, df: int) -> float:
-    """Chi-square survival function; returns NaN if SciPy unavailable."""
-    try:
-        from scipy.stats import chi2  # type: ignore
-
-        return float(chi2.sf(x, df))
-    except Exception:
-        return float("nan")
 
 
 def qlike_loss(e: np.ndarray, sigma2: np.ndarray) -> float:
     """Return average QLIKE loss: log(sigma2) + e^2 / sigma2.
 
     Args:
+    ----
         e: Residuals aligned to sigma2 (length n)
         sigma2: Conditional variance sequence (positive; length n)
 
     Returns:
+    -------
         Mean QLIKE over finite pairs.
+
     """
     e = np.asarray(e, dtype=float).ravel()
     s2 = np.asarray(sigma2, dtype=float).ravel()
@@ -75,44 +69,6 @@ def mse_mae_variance(e: np.ndarray, sigma2: np.ndarray) -> dict[str, float]:
         "mse": float(np.mean((y - f) ** 2)),
         "mae": float(np.mean(np.abs(y - f))),
     }
-
-
-def _compute_mz_pvalues(
-    beta: np.ndarray,
-    x_mat: np.ndarray,
-    ss_res: float,
-) -> dict[str, float]:
-    """Compute p-values for Mincer-Zarnowitz regression coefficients.
-
-    Args:
-        beta: Regression coefficients.
-        x_mat: Design matrix.
-        ss_res: Sum of squared residuals.
-
-    Returns:
-        Dictionary with t-statistics and p-values.
-    """
-    try:
-        from scipy.stats import t as student_t  # type: ignore
-
-        n, k = x_mat.shape
-        s2_err = ss_res / max(1, n - k)
-        xtx_inv = np.linalg.inv(x_mat.T @ x_mat)
-        se = np.sqrt(np.diag(xtx_inv) * s2_err)
-        t_intercept = float(beta[0] / se[0]) if se[0] > 0 else float("nan")
-        t_slope = float(beta[1] / se[1]) if se[1] > 0 else float("nan")
-        dof = max(1, n - k)
-        p_intercept = float(2.0 * (1.0 - student_t.cdf(abs(t_intercept), df=dof)))
-        p_slope = float(2.0 * (1.0 - student_t.cdf(abs(t_slope), df=dof)))
-        return {
-            "t_intercept": t_intercept,
-            "t_slope": t_slope,
-            "p_intercept": p_intercept,
-            "p_slope": p_slope,
-        }
-    except Exception as ex:
-        logger.debug("SciPy unavailable for MZ p-values; continuing without: %s", ex)
-        return {}
 
 
 def mincer_zarnowitz(e: np.ndarray, sigma2: np.ndarray) -> dict[str, float]:
@@ -141,7 +97,7 @@ def mincer_zarnowitz(e: np.ndarray, sigma2: np.ndarray) -> dict[str, float]:
         "slope": float(beta[1]),
         "r2": float(r2),
     }
-    out.update(_compute_mz_pvalues(beta, x_mat, ss_res))
+    out.update(compute_mz_pvalues(beta, x_mat, ss_res))
     return out
 
 
@@ -172,6 +128,7 @@ def apply_mz_calibration(
     """Apply MZ calibration: h_adj = max(eps, a + b * h) or h_adj = b * h.
 
     Args:
+    ----
         sigma2: Variance array to calibrate.
         intercept: MZ regression intercept.
         slope: MZ regression slope.
@@ -180,53 +137,37 @@ def apply_mz_calibration(
                       If True, use full additive calibration (intercept + slope * h).
 
     Returns:
+    -------
         Calibrated variance array.
+
     """
     s2 = np.asarray(sigma2, dtype=float)
-    if use_intercept:
-        h_adj = intercept + slope * s2
-    else:
-        # Multiplicative calibration only (more stable)
-        h_adj = slope * s2
+    # Multiplicative calibration only (more stable) if use_intercept is False
+    h_adj = intercept + slope * s2 if use_intercept else slope * s2
     return np.asarray(np.maximum(eps, h_adj), dtype=float)
 
 
-def _var_quantile(alpha: float, dist: str, nu: float | None, lambda_skew: float | None = None) -> float:
-    """Quantile for VaR under Normal/Student/Skew-t innovations (left tail)."""
-    try:
-        from scipy.stats import norm, t  # type: ignore
-    except Exception as exc:  # pragma: no cover - SciPy is expected in project
-        msg = "SciPy required for VaR backtests"
-        raise RuntimeError(msg) from exc
-
-    if dist.lower() == "student":
-        if nu is None or nu <= GARCH_STUDENT_NU_MIN:
-            msg = "Student-t requires nu>2 for VaR"
-            raise ValueError(msg)
-        return float(t.ppf(alpha, df=nu))
-    if dist.lower() == "skewt":
-        if nu is None or nu <= GARCH_STUDENT_NU_MIN or lambda_skew is None:
-            msg = "Skew-t requires nu>2 and lambda for VaR"
-            raise ValueError(msg)
-        return float(skewt_ppf(alpha, nu, lambda_skew))
-    return float(norm.ppf(alpha))
-
-
 def _build_var_series(
-    sigma2: np.ndarray, alpha: float, dist: str, nu: float | None, lambda_skew: float | None = None
+    sigma2: np.ndarray,
+    alpha: float,
+    dist: str,
+    nu: float | None,
+    lambda_skew: float | None = None,
 ) -> np.ndarray:
     """Return VaR_t series at level alpha with zero mean: VaR = q_alpha * sigma_t."""
-    s2 = np.asarray(sigma2, dtype=float).ravel()
-    q = _var_quantile(float(alpha), dist, nu, lambda_skew)
-    return q * np.sqrt(s2)
+    from src.garch.garch_eval.utils import build_var_series
+
+    return build_var_series(sigma2, alpha, dist, nu, lambda_skew)
 
 
 def empirical_quantiles(z: np.ndarray, alphas: list[float]) -> dict[float, float]:
     """Return empirical left-tail quantiles of standardized residuals.
 
     Args:
+    ----
         z: Standardized residuals (train) ~ iid under well-specified model.
         alphas: Tail probabilities (e.g., [0.01, 0.05]).
+
     """
     zz = np.asarray(z, dtype=float)
     zz = zz[np.isfinite(zz)]
@@ -242,10 +183,14 @@ def kupiec_pof_test(hits: np.ndarray, alpha: float) -> dict[str, float]:
     """Kupiec Proportion-of-Failures (POF) test.
 
     Args:
+    ----
         hits: 1 if return < VaR, else 0.
         alpha: Target tail probability (e.g. 0.01).
+
     Returns:
+    -------
         Dict with n, x, hit_rate, lr_uc, p_value.
+
     """
     h = np.asarray(hits, dtype=float).ravel()
     m = np.isfinite(h)
@@ -268,7 +213,7 @@ def kupiec_pof_test(hits: np.ndarray, alpha: float) -> dict[str, float]:
         return (n - x) * np.log(1 - p) + x * np.log(p)
 
     lr_uc = -2.0 * (_lnp(alpha) - _lnp(phat))
-    p_val = _chi2_sf(float(lr_uc), df=1)
+    p_val = chi2_sf(float(lr_uc), df=1)
     return {
         "n": float(n),
         "x": float(x),
@@ -312,7 +257,7 @@ def christoffersen_ind_test(hits: np.ndarray) -> dict[str, float]:
     l1 = _ll(p01, p11)
     l0 = _ll(p, p)
     lr_ind = -2.0 * (l0 - l1)
-    p_val = _chi2_sf(float(lr_ind), df=1)
+    p_val = chi2_sf(float(lr_ind), df=1)
     return {
         "lr_ind": float(lr_ind),
         "p_value": float(p_val),
@@ -351,315 +296,8 @@ def var_backtest_metrics(
             "lr_ind": ind["lr_ind"],
             "p_ind": ind["p_value"],
             "lr_cc": float(kup["lr_uc"] + ind["lr_ind"]),
-            "p_cc": _chi2_sf(float(kup["lr_uc"] + ind["lr_ind"]), df=2),
+            "p_cc": chi2_sf(float(kup["lr_uc"] + ind["lr_ind"]), df=2),
         }
-    return out
-
-
-def _prepare_residuals_from_dataset(
-    dataset: pd.DataFrame,
-) -> tuple[pd.DataFrame, np.ndarray, np.ndarray, np.ndarray]:
-    """Prepare and filter residuals from dataset, preserving index alignment.
-
-    Args:
-        dataset: Input dataset DataFrame.
-
-    Returns:
-        Tuple of (sorted_dataframe, all_residuals, valid_mask, filtered_residuals).
-        Returns empty arrays if no valid residuals found.
-    """
-    df_sorted = dataset.sort_values("date").reset_index(drop=True)
-
-    # Build residual series and preserve index alignment
-    series = pd.to_numeric(df_sorted.get("arima_residual_return"), errors="coerce")
-    resid = np.asarray(series, dtype=float)
-    valid_mask = np.isfinite(resid)
-    if not np.any(valid_mask):
-        return (
-            df_sorted,
-            np.array([], dtype=float),
-            np.array([], dtype=bool),
-            np.array([], dtype=float),
-        )
-
-    # Filtered contiguous residuals for variance recursion
-    resid_f = resid[valid_mask]
-    return df_sorted, resid, valid_mask, resid_f
-
-
-def _compute_variance_path_for_test(
-    resid_f: np.ndarray,
-    model_name: str,
-    params: dict[str, float],
-    dist: str,
-    nu: float | None,
-    lambda_skew: float | None = None,
-) -> np.ndarray:
-    """Compute variance path for filtered residuals using EGARCH(1,1).
-
-    Args:
-        resid_f: Filtered residual series.
-        model_name: Model name (e.g., 'egarch_normal', 'egarch_skewt').
-        params: Model parameters dictionary.
-        dist: Distribution type ('normal' or 'skewt').
-        nu: Degrees of freedom (for Skew-t).
-        lambda_skew: Skewness parameter (for Skew-t).
-
-    Returns:
-        Variance path array, or empty array if computation failed.
-    """
-    omega = float(params.get("omega", np.nan))
-    alpha = float(params.get("alpha", np.nan))
-    beta = float(params.get("beta", np.nan))
-    gamma_val = params.get("gamma")
-    gamma = float(gamma_val) if gamma_val is not None else 0.0
-
-    s2_f = egarch11_variance(
-        resid_f, omega, alpha, gamma, beta, dist=dist, nu=nu, lambda_skew=lambda_skew
-    )
-
-    # If recursion failed, return empty to signal no valid metrics
-    if not (np.all(np.isfinite(s2_f)) and np.all(s2_f > 0)):
-        return np.array([], dtype=float)
-    return s2_f
-
-
-def _extract_aligned_test_indices(
-    df_sorted: pd.DataFrame,
-    valid_mask: np.ndarray,
-) -> np.ndarray:
-    """Extract aligned test indices from sorted dataset.
-
-    Args:
-        df_sorted: Sorted dataset DataFrame.
-        valid_mask: Boolean mask for valid residuals.
-
-    Returns:
-        Array of positions in filtered arrays for test data, or empty array if none.
-    """
-    # Extract aligned test block using masks on the original index
-    test_mask = (df_sorted["split"].astype(str) == "test").to_numpy()
-    idx_all = np.arange(df_sorted.shape[0])
-    idx_valid = idx_all[valid_mask]
-    idx_test = idx_all[test_mask]
-    idx_test_valid = np.intersect1d(idx_valid, idx_test, assume_unique=False)
-    if idx_test_valid.size == 0:
-        return np.array([], dtype=int)
-
-    # Map original indices -> positions in filtered arrays
-    pos_in_valid = -np.ones(df_sorted.shape[0], dtype=int)
-    pos_in_valid[idx_valid] = np.arange(idx_valid.size)
-    pos_test = pos_in_valid[idx_test_valid]
-    # Keep order of time by sorting positions
-    pos_test.sort()
-    return pos_test
-
-
-def _load_test_resid_sigma2(
-    params: dict[str, float],
-    dataset: pd.DataFrame,
-    *,
-    model_name: str,
-    dist: str,
-    nu: float | None,
-    lambda_skew: float | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Return aligned residuals and sigma² on the test split for the chosen model.
-
-    Why: Previous implementation dropped NaNs before slicing, which broke
-    alignment. This version uses EGARCH(1,1) parameters correctly.
-
-    Args:
-        params: Model parameters dictionary.
-        dataset: Input dataset DataFrame.
-        model_name: Model name.
-        dist: Distribution type.
-        nu: Degrees of freedom.
-        lambda_skew: Skewness parameter (for Skew-t).
-
-    Returns:
-        Tuple of (test_residuals, test_variance).
-    """
-    # Prepare residuals
-    df_sorted, resid, valid_mask, resid_f = _prepare_residuals_from_dataset(dataset)
-    if resid_f.size == 0:
-        return np.array([], dtype=float), np.array([], dtype=float)
-
-    # Compute variance path
-    s2_f = _compute_variance_path_for_test(resid_f, model_name, params, dist, nu, lambda_skew)
-    if s2_f.size == 0:
-        return np.array([], dtype=float), np.array([], dtype=float)
-
-    # Extract aligned test indices
-    pos_test = _extract_aligned_test_indices(df_sorted, valid_mask)
-    if pos_test.size == 0:
-        return np.array([], dtype=float), np.array([], dtype=float)
-
-    # Extract test data
-    e_test = resid_f[pos_test]
-    s2_test = s2_f[pos_test]
-    return e_test.astype(float), s2_test.astype(float)
-
-
-def _load_dataset_for_metrics() -> pd.DataFrame:
-    """Load dataset for metrics computation, preferring variance outputs CSV.
-
-    Returns:
-        Dataset DataFrame.
-    """
-    try:
-        dataset_df = pd.read_csv(GARCH_VARIANCE_OUTPUTS_FILE, parse_dates=["date"])  # type: ignore[arg-type]
-    except Exception:
-        dataset_df = pd.read_csv(GARCH_DATASET_FILE, parse_dates=["date"])  # type: ignore[arg-type]
-    return dataset_df
-
-
-def _filter_test_data(
-    e_test: np.ndarray,
-    s2_test: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Filter test data to keep only finite and positive variance values.
-
-    Args:
-        e_test: Test residuals.
-        s2_test: Test variance.
-
-    Returns:
-        Tuple of (filtered_residuals, filtered_variance).
-    """
-    m = np.isfinite(e_test) & np.isfinite(s2_test) & (s2_test > 0)
-    return e_test[m], s2_test[m]
-
-
-def _compute_variance_metrics(
-    e_test: np.ndarray,
-    s2_test: np.ndarray,
-) -> dict[str, float]:
-    """Compute variance forecast metrics (QLIKE, MSE, MAE).
-
-    Args:
-        e_test: Test residuals.
-        s2_test: Test variance.
-
-    Returns:
-        Dictionary with variance metrics.
-    """
-    out_losses = mse_mae_variance(e_test, s2_test)
-    return {
-        "n_test": int(e_test.size),
-        "qlike": qlike_loss(e_test, s2_test),
-        "mse_var": out_losses["mse"],
-        "mae_var": out_losses["mae"],
-    }
-
-
-def _apply_mz_calibration_if_requested(
-    e_test: np.ndarray,
-    s2_test: np.ndarray,
-    use_mz_calibration: bool,
-) -> tuple[np.ndarray, dict[str, float], float, float]:
-    """Apply MZ calibration to test variances if requested.
-
-    Args:
-        e_test: Test residuals.
-        s2_test: Test variance.
-        use_mz_calibration: Whether to apply calibration.
-
-    Returns:
-        Tuple of (calibrated_variance, mz_results, intercept, slope).
-    """
-    mz_results = mincer_zarnowitz(e_test, s2_test)
-    mz_intercept = mz_results.get("intercept", 0.0)
-    mz_slope = mz_results.get("slope", GARCH_EVAL_DEFAULT_SLOPE)
-
-    if use_mz_calibration:
-        s2_calibrated = apply_mz_calibration(s2_test, mz_intercept, mz_slope, use_intercept=False)
-        logger.info(
-            f"Applied MZ calibration (multiplicative): slope={mz_slope:.3f} "
-            f"(intercept={mz_intercept:.6f} ignored for stability)"
-        )
-    else:
-        s2_calibrated = s2_test
-
-    return s2_calibrated, mz_results, mz_intercept, mz_slope
-
-
-def _add_comparison_metrics(
-    out: dict[str, object],
-    e_test: np.ndarray,
-    s2_test: np.ndarray,
-    s2_calibrated: np.ndarray,
-    use_mz_calibration: bool,
-) -> None:
-    """Add comparison metrics between original and calibrated variances.
-
-    Args:
-        out: Output dictionary to update.
-        e_test: Test residuals.
-        s2_test: Original test variance.
-        s2_calibrated: Calibrated test variance.
-        use_mz_calibration: Whether calibration was applied.
-    """
-    if use_mz_calibration:
-        variance_metrics_original = _compute_variance_metrics(e_test, s2_test)
-        out["variance_metrics_original"] = variance_metrics_original
-        mz_calibrated = mincer_zarnowitz(e_test, s2_calibrated)
-        out["mz_calibrated"] = {f"mz_{k}": v for k, v in mz_calibrated.items()}
-
-
-def _compute_all_metrics(
-    e_test: np.ndarray,
-    s2_test: np.ndarray,
-    dist: str,
-    nu: float | None,
-    alphas: list[float],
-    *,
-    lambda_skew: float | None = None,
-    use_mz_calibration: bool = True,
-) -> dict[str, object]:
-    """Compute all GARCH evaluation metrics.
-
-    Args:
-        e_test: Test residuals.
-        s2_test: Test variance.
-        dist: Distribution type.
-        nu: Degrees of freedom.
-        alphas: VaR alpha levels.
-        use_mz_calibration: Whether to apply MZ calibration.
-
-    Returns:
-        Dictionary with all metrics.
-    """
-    out: dict[str, object] = {}
-
-    # Apply MZ calibration if requested
-    s2_calibrated, mz_results, mz_intercept, mz_slope = _apply_mz_calibration_if_requested(
-        e_test, s2_test, use_mz_calibration
-    )
-
-    # Add variance metrics (use calibrated variance if calibration is applied)
-    s2_for_metrics = s2_calibrated if use_mz_calibration else s2_test
-    variance_metrics = _compute_variance_metrics(e_test, s2_for_metrics)
-    out.update(variance_metrics)
-
-    # Add Mincer-Zarnowitz metrics (on original variances for diagnostic)
-    out.update({f"mz_{k}": v for k, v in mz_results.items()})
-
-    # Add MZ calibration parameters
-    out["mz_calibration"] = {
-        "intercept": float(mz_intercept),
-        "slope": float(mz_slope),
-        "applied": use_mz_calibration,
-    }
-
-    # Add VaR backtests on original variances (never MZ before VaR)
-    out["var_backtests"] = var_backtest_metrics(
-        e_test, s2_test, dist=dist, nu=nu, lambda_skew=lambda_skew, alphas=alphas
-    )
-
-    # Add comparison metrics (original vs calibrated)
-    _add_comparison_metrics(out, e_test, s2_test, s2_calibrated, use_mz_calibration)
-
     return out
 
 
@@ -676,6 +314,7 @@ def compute_classic_metrics_from_artifacts(
     """Compute classic GARCH metrics on the test split and return a summary dict.
 
     Args:
+    ----
         params: Model parameters dictionary.
         model_name: Model name.
         dist: Distribution type.
@@ -685,25 +324,38 @@ def compute_classic_metrics_from_artifacts(
         apply_mz_calibration: Whether to apply MZ calibration to variances.
 
     Returns:
+    -------
         Dictionary with all computed metrics.
+
     """
     if alphas is None:
         alphas = list(GARCH_EVAL_DEFAULT_ALPHAS)
 
     # Load dataset
-    dataset_df = _load_dataset_for_metrics()
+    dataset_df = load_dataset_for_metrics()
 
     # Load test residuals and variance
-    e_test, s2_test = _load_test_resid_sigma2(
-        params, dataset_df, model_name=model_name, dist=dist, nu=nu, lambda_skew=lambda_skew
+    e_test, s2_test = load_test_resid_sigma2(
+        params,
+        dataset_df,
+        model_name=model_name,
+        dist=dist,
+        nu=nu,
+        lambda_skew=lambda_skew,
     )
 
     # Filter test data
-    e_test, s2_test = _filter_test_data(e_test, s2_test)
+    e_test, s2_test = filter_test_data(e_test, s2_test)
 
     # Compute all metrics with optional MZ calibration
-    return _compute_all_metrics(
-        e_test, s2_test, dist, nu, alphas, lambda_skew=lambda_skew, use_mz_calibration=apply_mz_calibration
+    return compute_all_metrics(
+        e_test,
+        s2_test,
+        dist,
+        nu,
+        alphas,
+        lambda_skew=lambda_skew,
+        use_mz_calibration=apply_mz_calibration,
     )
 
 

@@ -26,11 +26,9 @@ import numpy as np
 
 from src.constants import (
     GARCH_ACF_LAGS_DEFAULT,
-    GARCH_DATASET_FILE,
-    GARCH_DIAGNOSTICS_DIR,
+    GARCH_DIAGNOSTIC_DIR,
     GARCH_DIAGNOSTICS_PLOTS_DIR,
     GARCH_DISTRIBUTION_DIAGNOSTICS_FILE,
-    GARCH_ESTIMATION_FILE,
     GARCH_LJUNG_BOX_LAGS_DEFAULT,
     GARCH_LJUNGBOX_FILE,
     GARCH_STD_ACF_PACF_PLOT,
@@ -45,115 +43,10 @@ from src.garch.garch_diagnostic.diagnostics import (
     save_acf_pacf_std_squared_plots,
     save_qq_plot_std_residuals,
 )
-from src.garch.structure_garch.detection import load_garch_dataset, prepare_residuals
+from src.garch.garch_diagnostic.utils import load_data_and_params
 from src.utils import get_logger
 
 logger = get_logger(__name__)
-
-
-def _check_converged_params(params: dict | None) -> bool:
-    """Check if parameters dictionary indicates convergence."""
-    return isinstance(params, dict) and params.get("converged", False)
-
-
-def _try_new_format_params(est_payload: dict) -> tuple[str | None, dict | None]:
-    """Try to extract parameters from new format keys.
-
-    Checks in preference order: egarch_skewt → egarch_student → egarch_normal.
-    """
-    egarch_skewt = est_payload.get("egarch_skewt")
-    if _check_converged_params(egarch_skewt):
-        return "skewt", egarch_skewt
-    egarch_student = est_payload.get("egarch_student")
-    if _check_converged_params(egarch_student):
-        return "student", egarch_student
-    egarch_normal = est_payload.get("egarch_normal")
-    if _check_converged_params(egarch_normal):
-        return "normal", egarch_normal
-    return None, None
-
-
-def _try_legacy_format_params(est_payload: dict) -> tuple[str | None, dict | None]:
-    """Try to extract parameters from legacy format (student, normal)."""
-    student = est_payload.get("student")
-    if _check_converged_params(student):
-        return "student", student
-    normal = est_payload.get("normal")
-    if _check_converged_params(normal):
-        return "normal", normal
-    return None, None
-
-
-def _choose_best_params(est_payload: dict) -> tuple[str | None, dict | None]:
-    """Choose best converged EGARCH parameters from estimation payload."""
-    dist, params = _try_new_format_params(est_payload)
-    if params is not None:
-        return dist, params
-    return _try_legacy_format_params(est_payload)
-
-
-def _load_estimation_file() -> dict:
-    """Load estimation JSON file.
-
-    Raises:
-        FileNotFoundError: If file is missing.
-        ValueError: If JSON is invalid.
-    """
-    try:
-        with open(GARCH_ESTIMATION_FILE) as f:
-            return json.load(f)
-    except FileNotFoundError:
-        logger.error("Estimation file not found: %s", GARCH_ESTIMATION_FILE)
-        raise
-    except json.JSONDecodeError as e:
-        logger.error("Invalid JSON in estimation file: %s", e)
-        raise ValueError(f"Invalid JSON in {GARCH_ESTIMATION_FILE}") from e
-
-
-def _extract_nu_from_params(best: dict) -> float | None:
-    """Extract nu parameter from best params dictionary."""
-    nu_value = best.get("nu")
-    return float(nu_value) if nu_value is not None else None  # type: ignore[arg-type]
-
-
-def _load_and_prepare_residuals() -> np.ndarray:
-    """Load dataset and prepare test residuals.
-
-    Raises:
-        ValueError: If no valid residuals found.
-    """
-    data_frame = load_garch_dataset(str(GARCH_DATASET_FILE))
-    resid_test = prepare_residuals(data_frame, use_test_only=True)
-    resid_test = resid_test[np.isfinite(resid_test)]
-    if resid_test.size == 0:
-        logger.error("No valid residuals found in test set")
-        raise ValueError("No valid residuals found in test set")
-    return resid_test
-
-
-def _load_data_and_params() -> tuple[np.ndarray, str | None, dict, float | None] | None:
-    """Load dataset, residuals, and best EGARCH parameters.
-
-    Returns:
-        Tuple of (residuals, distribution, params, nu) or None if no converged model found.
-
-    Raises:
-        FileNotFoundError: If required files are missing.
-        ValueError: If data loading fails.
-    """
-    est = _load_estimation_file()
-    dist, best = _choose_best_params(est)
-    if best is None:
-        logger.warning("No converged EGARCH model found in %s", GARCH_ESTIMATION_FILE)
-        return None
-
-    nu = _extract_nu_from_params(best)
-    try:
-        resid_test = _load_and_prepare_residuals()
-        return resid_test, dist, best, nu
-    except Exception as e:
-        logger.error("Failed to load dataset or prepare residuals: %s", e)
-        raise
 
 
 def _generate_acf_pacf_plots(
@@ -226,8 +119,8 @@ def _run_ljung_box_tests(
             dist=(dist or "normal"),
             nu=nu,
         )
-        GARCH_DIAGNOSTICS_DIR.mkdir(parents=True, exist_ok=True)
-        with Path(GARCH_LJUNGBOX_FILE).open("w") as f:
+        GARCH_DIAGNOSTIC_DIR.mkdir(parents=True, exist_ok=True)
+        with Path(GARCH_LJUNGBOX_FILE).open("w", encoding="utf-8") as f:
             json.dump(lb2, f, indent=2)
         logger.info("Saved Ljung-Box(z^2) to: %s", GARCH_LJUNGBOX_FILE)
     except Exception as ex:
@@ -264,7 +157,8 @@ def _run_distribution_diagnostics(
         dist: Distribution name (normal or student).
     """
     try:
-        nu = float(best_params.get("nu")) if best_params.get("nu") is not None else None  # type: ignore[arg-type]
+        nu_val = best_params.get("nu")
+        nu = float(nu_val) if nu_val is not None else None  # type: ignore[arg-type]
         diag = compute_distribution_diagnostics(
             resid_test, best_params, dist=(dist or "normal"), nu=nu
         )
@@ -276,8 +170,8 @@ def _run_distribution_diagnostics(
             outdir=GARCH_DIAGNOSTICS_PLOTS_DIR,
             filename=GARCH_STD_QQ_PLOT.name,
         )
-        GARCH_DIAGNOSTICS_DIR.mkdir(parents=True, exist_ok=True)
-        with Path(GARCH_DISTRIBUTION_DIAGNOSTICS_FILE).open("w") as f:
+        GARCH_DIAGNOSTIC_DIR.mkdir(parents=True, exist_ok=True)
+        with Path(GARCH_DISTRIBUTION_DIAGNOSTICS_FILE).open("w", encoding="utf-8") as f:
             json.dump(diag, f, indent=2)
         logger.info("Saved distribution diagnostics to: %s", GARCH_DISTRIBUTION_DIAGNOSTICS_FILE)
         logger.info("Distribution diagnostics: %s", diag)
@@ -302,7 +196,7 @@ def main() -> None:
     logger.info("GARCH DIAGNOSTICS (post-estimation)")
     logger.info("=" * 60)
 
-    result = _load_data_and_params()
+    result = load_data_and_params()
     if result is None:
         return
     resid_test, dist, best, nu = result
