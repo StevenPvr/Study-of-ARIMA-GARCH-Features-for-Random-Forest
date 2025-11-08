@@ -24,6 +24,7 @@ from src.arima.evaluation_arima.evaluation_arima import (
     ljung_box_on_residuals,
     rolling_forecast,
     save_evaluation_results,
+    walk_forward_backtest,
 )
 
 
@@ -169,6 +170,61 @@ class TestRollingForecast:
         assert len(actuals) == len(test_series)
         # With refit_every=2 and four steps, append should run twice with one obs each
         assert append_lengths == [1, 1]
+
+
+class TestWalkForwardBacktest:
+    """Tests for walk_forward_backtest function."""
+
+    @patch("src.arima.evaluation_arima.evaluation_arima.rolling_forecast")
+    def test_walk_forward_backtest_returns_split_metrics(
+        self,
+        mock_rolling_forecast: MagicMock,
+    ) -> None:
+        """Ensure backtest yields ordered split metrics and aggregated stats."""
+
+        series = pd.Series(
+            np.linspace(0.0, 0.1, 30),
+            index=pd.date_range("2021-01-01", periods=30, freq="D"),
+        )
+
+        def side_effect(
+            train: pd.Series,
+            test: pd.Series,
+            order: tuple[int, int, int],
+            seasonal_order: tuple[int, int, int, int],
+            refit_every: int,
+            verbose: bool,
+        ) -> tuple[np.ndarray, np.ndarray]:
+            values = test.to_numpy(dtype=float)
+            return values, values
+
+        mock_rolling_forecast.side_effect = side_effect
+
+        split_df, summary = walk_forward_backtest(
+            series,
+            order=(1, 0, 0),
+            seasonal_order=(0, 0, 0, 12),
+            n_splits=3,
+            test_size=5,
+            refit_every=2,
+        )
+
+        assert len(split_df) == 3
+        assert {"MSE", "RMSE", "MAE"}.issubset(split_df.columns)
+        assert split_df["validation_start"].is_monotonic_increasing
+        assert all(split_df["train_end"] < split_df["validation_start"])
+
+        expected_summary_keys = {
+            "mse_mean",
+            "mse_std",
+            "rmse_mean",
+            "rmse_std",
+            "mae_mean",
+            "mae_std",
+        }
+        assert expected_summary_keys.issubset(summary.keys())
+        for value in summary.values():
+            assert value == pytest.approx(0.0)
 
 
 class TestCalculateMetrics:

@@ -39,6 +39,8 @@ SARIMA_DEFAULT_SEASONAL_PERIOD: int = 12
 # Refit every 20 days balances model adaptation with computational efficiency
 # Forecasts remain at 1-day horizon (steps=1) for daily predictions
 SARIMA_REFIT_EVERY_DEFAULT: int = 20
+SARIMA_BACKTEST_N_SPLITS_DEFAULT: int = 3
+SARIMA_BACKTEST_TEST_SIZE_DEFAULT: int = 20
 LJUNGBOX_SIGNIFICANCE_LEVEL: float = 0.05
 DATE_FORMAT_DEFAULT: str = "%Y-%m-%d"
 PLOT_FIGURE_SIZE_DEFAULT: tuple[int, int] = (10, 4)

@@ -9,6 +9,7 @@ from .evaluation_arima import (
     ljung_box_on_residuals,
     plot_residuals_acf_with_ljungbox,
     rolling_forecast,
+    walk_forward_backtest,
     save_evaluation_results,
     save_ljung_box_results,
 )
@@ -21,6 +22,7 @@ __all__ = [
     "ljung_box_on_residuals",
     "plot_residuals_acf_with_ljungbox",
     "rolling_forecast",
+    "walk_forward_backtest",
     "save_evaluation_results",
     "save_ljung_box_results",
     "save_garch_dataset",
