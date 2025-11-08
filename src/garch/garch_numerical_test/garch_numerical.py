@@ -20,92 +20,14 @@ from src.constants import (
 )
 from src.utils import get_logger
 
+from src.garch.garch_numerical_test.utils import (
+    chi2_sf,
+    compute_arch_lm_statistic,
+    compute_ljung_box_stats,
+    prepare_lags_list,
+)
+
 logger = get_logger(__name__)
-
-
-def _prepare_lags_list(lags: int | list[int]) -> list[int]:
-    """Convert lags to a list of integers.
-
-    Args:
-        lags: Single lag or list of lags.
-
-    Returns:
-        List of lag integers.
-    """
-    if isinstance(lags, int):
-        return list(range(1, lags + 1))
-    return sorted(set(int(lag) for lag in lags if lag > 0))
-
-
-def _chi2_sf(x: float, df: int) -> float:
-    """Chi-square survival function P[X >= x].
-
-    Args:
-        x: Test statistic value.
-        df: Degrees of freedom.
-
-    Returns:
-        P-value.
-    """
-    try:
-        from scipy.stats import chi2  # type: ignore
-
-        return float(chi2.sf(x, df))
-    except Exception:
-        return float("nan")
-
-
-def _compute_ljung_box_manual(
-    res_centered: np.ndarray, lags_list: list[int], n: float
-) -> tuple[list[float], list[float]]:
-    """Compute Ljung-Box statistics manually.
-
-    Args:
-        res_centered: Centered residual series.
-        lags_list: List of lag values to test.
-        n: Sample size.
-
-    Returns:
-        Tuple of (lb_stats, lb_pvalues) lists.
-    """
-    lb_stats = []
-    lb_pvalues = []
-    s = 0.0
-    for h in lags_list:
-        if h >= n:
-            break
-        acf_h = np.sum(res_centered[h:] * res_centered[:-h]) / np.sum(res_centered**2)
-        s += (acf_h * acf_h) / max(1.0, (n - h))
-        q = n * (n + 2.0) * s
-        lb_stats.append(float(q))
-        p_val = _chi2_sf(q, h)
-        lb_pvalues.append(p_val)
-    return lb_stats, lb_pvalues
-
-
-def _compute_ljung_box_stats(
-    res: np.ndarray, lags_list: list[int]
-) -> tuple[list[float], list[float]]:
-    """Compute Ljung-Box statistics using statsmodels or fallback.
-
-    Args:
-        res: Residual series (already cleaned).
-        lags_list: List of lag values to test.
-
-    Returns:
-        Tuple of (lb_stats, lb_pvalues) lists.
-    """
-    try:
-        from statsmodels.stats.diagnostic import acorr_ljungbox  # type: ignore
-
-        df = acorr_ljungbox(res, lags=lags_list, return_df=True)
-        return [float(x) for x in df["lb_stat"]], [float(x) for x in df["lb_pvalue"]]
-    except Exception as e:
-        logger.debug(f"Fallback in Ljung-Box computation: {e}")
-        n = float(res.size)
-        mean_res = np.mean(res)
-        res_centered = res - mean_res
-        return _compute_ljung_box_manual(res_centered, lags_list, n)
 
 
 def ljung_box_test(
@@ -128,7 +50,7 @@ def ljung_box_test(
     """
     res = np.asarray(residuals, dtype=float)
     res = res[np.isfinite(res)]
-    lags_list = _prepare_lags_list(lags)
+    lags_list = prepare_lags_list(lags)
 
     if res.size == 0 or not lags_list:
         return {
@@ -139,7 +61,7 @@ def ljung_box_test(
             "n": 0,
         }
 
-    lb_stats, lb_pvalues = _compute_ljung_box_stats(res, lags_list)
+    lb_stats, lb_pvalues = compute_ljung_box_stats(res, lags_list)
     reject = bool(lb_pvalues[-1] < alpha) if lb_pvalues else False
     return {
         "lags": lags_list[: len(lb_stats)],
@@ -174,33 +96,6 @@ def ljung_box_squared_test(
     return ljung_box_test(res_squared, lags=lags, alpha=alpha)
 
 
-def _compute_arch_lm_statistic(e2: np.ndarray, lags: int) -> float:
-    """Compute ARCH-LM test statistic.
-
-    Args:
-        e2: Squared residuals.
-        lags: Number of lags in regression.
-
-    Returns:
-        LM test statistic value.
-    """
-    n = int(e2.size)
-    Y = e2[lags:]
-    X = np.ones((n - lags, lags + 1), dtype=float)
-    for j in range(1, lags + 1):
-        X[:, j] = e2[lags - j : n - j]
-
-    try:
-        beta = np.linalg.lstsq(X, Y, rcond=None)[0]
-        Y_hat = X @ beta
-        ss_tot = float(np.sum((Y - np.mean(Y)) ** 2))
-        ss_res = float(np.sum((Y - Y_hat) ** 2))
-        r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
-        return (n - lags) * max(0.0, r2)
-    except Exception:
-        return float("nan")
-
-
 def engle_arch_lm_test(
     residuals: np.ndarray,
     lags: int = GARCH_LM_LAGS_DEFAULT,
@@ -232,8 +127,8 @@ def engle_arch_lm_test(
             "n": n,
         }
 
-    lm = _compute_arch_lm_statistic(e2, lags)
-    p_val = _chi2_sf(lm, lags)
+    lm = compute_arch_lm_statistic(e2, lags)
+    p_val = chi2_sf(lm, lags)
     reject = bool(np.isfinite(p_val) and p_val < alpha)
 
     return {
@@ -267,7 +162,7 @@ def mcleod_li_test(
     res = np.asarray(residuals, dtype=float)
     res = res[np.isfinite(res)]
     res_squared = res**2
-    lags_list = _prepare_lags_list(lags)
+    lags_list = prepare_lags_list(lags)
 
     if res_squared.size == 0 or not lags_list:
         return {
@@ -278,7 +173,7 @@ def mcleod_li_test(
             "n": 0,
         }
 
-    lb_stats, lb_pvalues = _compute_ljung_box_stats(res_squared, lags_list)
+    lb_stats, lb_pvalues = compute_ljung_box_stats(res_squared, lags_list)
     reject = bool(lb_pvalues[-1] < alpha) if lb_pvalues else False
     return {
         "lags": lags_list[: len(lb_stats)],

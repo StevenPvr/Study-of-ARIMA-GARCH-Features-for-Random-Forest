@@ -24,7 +24,7 @@ import pandas as pd
 
 import src.constants as C
 from src.models import egarch as eg
-from src.garch.structure_garch.detection import load_garch_dataset
+from src.garch.structure_garch.utils import load_garch_dataset
 from src.utils import get_logger
 
 logger = get_logger(__name__)

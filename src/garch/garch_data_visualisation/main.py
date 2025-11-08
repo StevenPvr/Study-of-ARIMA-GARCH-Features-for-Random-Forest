@@ -30,7 +30,7 @@ from src.garch.garch_data_visualisation.utils import (
     extract_dates_from_dataframe,
     prepare_test_dataframe,
 )
-from src.garch.structure_garch.detection import load_garch_dataset
+from src.garch.structure_garch.utils import load_garch_dataset
 from src.utils import get_logger
 
 logger = get_logger(__name__)

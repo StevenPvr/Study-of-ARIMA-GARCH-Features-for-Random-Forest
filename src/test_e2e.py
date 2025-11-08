@@ -360,7 +360,8 @@ def test_e2e_full_pipeline_offline(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     garch_df = pd.read_csv(_GARCH_DATASET_FILE, parse_dates=["date"])  # type: ignore[arg-type]
 
     # 4a) GARCH structure detection (ARCH-LM test)
-    from src.garch.structure_garch.detection import detect_heteroskedasticity, prepare_residuals
+    from src.garch.structure_garch.detection import detect_heteroskedasticity
+    from src.garch.structure_garch.utils import prepare_residuals
     monkeypatch.setattr(C, "GARCH_DIAGNOSTICS_FILE", tmp_path / "garch_diagnostics.json", raising=False)
     resid_test = prepare_residuals(garch_df, use_test_only=True)
     resid_test = resid_test[np.isfinite(resid_test)]

@@ -13,7 +13,7 @@ if str(_project_root) not in sys.path:
 
 from src.benchmark.bench_volatility import run_vol_backtest, save_vol_backtest_outputs
 from src.constants import VOL_EWMA_LAMBDA_DEFAULT, VOL_ROLLING_WINDOW_DEFAULT
-from src.garch.structure_garch.detection import load_garch_dataset
+from src.garch.structure_garch.utils import load_garch_dataset
 from src.utils import get_logger
 
 logger = get_logger(__name__)

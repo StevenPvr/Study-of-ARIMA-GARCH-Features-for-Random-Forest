@@ -31,8 +31,10 @@ from src.constants import (
 )
 from src.garch.structure_garch.detection import (
     detect_heteroskedasticity,
-    load_garch_dataset,
     plot_arch_diagnostics,
+)
+from src.garch.structure_garch.utils import (
+    load_garch_dataset,
     prepare_residuals,
 )
 from src.utils import get_logger

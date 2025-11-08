@@ -11,21 +11,27 @@ Provides utilities for ARCH/GARCH identification and diagnostics:
 from __future__ import annotations
 
 from src.garch.structure_garch.detection import (
+    detect_heteroskedasticity,
+    plot_arch_diagnostics,
+)
+from src.garch.structure_garch.utils import (
+    chi2_sf,
     compute_acf,
     compute_arch_lm_test,
     compute_squared_acf,
-    detect_heteroskedasticity,
     load_garch_dataset,
-    plot_arch_diagnostics,
     prepare_residuals,
 )
 
 __all__ = [
+    # Main detection functions
+    "detect_heteroskedasticity",
+    "plot_arch_diagnostics",
+    # Utility functions
     "compute_acf",
     "compute_arch_lm_test",
     "compute_squared_acf",
-    "detect_heteroskedasticity",
+    "chi2_sf",
     "load_garch_dataset",
-    "plot_arch_diagnostics",
     "prepare_residuals",
 ]

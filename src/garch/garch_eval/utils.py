@@ -29,7 +29,7 @@ from src.constants import (
 )
 from src.garch.garch_eval.distributions import skewt_ppf
 from src.garch.garch_params.estimation import egarch11_variance
-from src.garch.structure_garch.detection import prepare_residuals
+from src.garch.structure_garch.utils import prepare_residuals
 from src.utils import get_logger
 
 logger = get_logger(__name__)

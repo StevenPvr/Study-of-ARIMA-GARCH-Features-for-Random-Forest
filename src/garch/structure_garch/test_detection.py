@@ -16,10 +16,12 @@ if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
 from src.garch.structure_garch.detection import (
-    compute_arch_lm_test,
-    compute_squared_acf,
     detect_heteroskedasticity,
     plot_arch_diagnostics,
+)
+from src.garch.structure_garch.utils import (
+    compute_arch_lm_test,
+    compute_squared_acf,
     prepare_residuals,
 )
 
@@ -37,7 +39,7 @@ def test_arch_lm_pvalue_monkeypatch(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_sf(x: float, df: int) -> float:
         return 0.001
 
-    monkeypatch.setattr("src.garch.structure_garch.detection._chi2_sf", fake_sf, raising=True)
+    monkeypatch.setattr("src.garch.structure_garch.utils.chi2_sf", fake_sf, raising=True)
     out = compute_arch_lm_test(resid, lags=4)
     assert out["df"] == 4
     assert out["p_value"] == pytest.approx(0.001)
@@ -49,7 +51,7 @@ def test_detect_heteroskedasticity_flags(monkeypatch: pytest.MonkeyPatch) -> Non
     def fake_sf(x: float, df: int) -> float:
         return 0.001
 
-    monkeypatch.setattr("src.garch.structure_garch.detection._chi2_sf", fake_sf, raising=True)
+    monkeypatch.setattr("src.garch.structure_garch.utils.chi2_sf", fake_sf, raising=True)
     out = detect_heteroskedasticity(resid, lags=4, acf_lags=10, alpha=0.05)
     assert out["arch_effect_present"] is True
     assert out["acf_significant"] is True

@@ -84,7 +84,9 @@ def test_egarch_variance_invalid_params() -> None:
     e = rng.normal(0.0, 0.01, size=100)
     # Extreme beta that causes instability
     with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", category=RuntimeWarning, message="overflow encountered in exp")
+        warnings.filterwarnings(
+            "ignore", category=RuntimeWarning, message="overflow encountered in exp"
+        )
         s2 = egarch11_variance(e, omega=100.0, alpha=10.0, gamma=10.0, beta=0.999, dist="normal")
     # Should handle gracefully (may return NaN or finite values)
     assert s2.shape == e.shape
@@ -98,14 +100,19 @@ def _validate_egarch_basic_fields(out: dict[str, float]) -> None:
     assert -0.999 < out["beta"] < 0.999
 
 
+def _validate_skewt_fields(out: dict[str, float]) -> None:
+    """Validate Skew-t specific fields."""
+    assert "nu" in out
+    assert "lambda" in out
+    assert out["nu"] > 2.0
+    assert -0.99 < out["lambda"] < 0.99
+
+
 def _validate_egarch_output(out: dict[str, float], expected_dist: str = "normal") -> None:
     """Validate EGARCH estimation output structure and values."""
     _validate_egarch_basic_fields(out)
     if expected_dist == "skewt":
-        assert "nu" in out
-        assert "lambda" in out
-        assert out["nu"] > 2.0
-        assert -0.99 < out["lambda"] < 0.99
+        _validate_skewt_fields(out)
 
 
 def test_estimate_egarch_converges_normal(large_sample_residuals: np.ndarray) -> None:
@@ -144,10 +151,22 @@ def test_estimate_egarch_invalid_input() -> None:
 def test_estimate_egarch_invalid_distribution(large_sample_residuals: np.ndarray) -> None:
     """Test that invalid distribution raises ValueError."""
     with pytest.raises(ValueError, match="must be 'normal', 'student', or 'skewt'"):
-        # Access internal function through setup to trigger error
-        from src.garch.garch_params.estimation import _egarch_setup
+        from src.garch.garch_params.utils import egarch_setup
+        from src.garch.garch_params.estimation import (
+            _negloglik_egarch_normal,
+            _negloglik_egarch_student,
+            _negloglik_egarch_skewt,
+        )
 
-        _egarch_setup(large_sample_residuals, "invalid", None, 0.01)
+        egarch_setup(
+            large_sample_residuals,
+            "invalid",
+            None,
+            0.01,
+            _negloglik_egarch_normal,
+            _negloglik_egarch_student,
+            _negloglik_egarch_skewt,
+        )
 
 
 if __name__ == "__main__":
