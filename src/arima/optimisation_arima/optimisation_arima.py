@@ -8,7 +8,12 @@ from typing import Any, cast
 
 import pandas as pd
 
-from src.constants import WEIGHTED_LOG_RETURNS_SPLIT_FILE
+from src.constants import (
+    SARIMA_BACKTEST_N_SPLITS_DEFAULT,
+    SARIMA_BACKTEST_TEST_SIZE_DEFAULT,
+    SARIMA_REFIT_EVERY_DEFAULT,
+    WEIGHTED_LOG_RETURNS_SPLIT_FILE,
+)
 from src.utils import get_logger
 
 from .utils import (
@@ -73,6 +78,10 @@ def optimize_sarima_models(
     Q_range: range = range(3),
     s: int = 12,
     n_jobs: int | None = None,
+    backtest_n_splits: int = SARIMA_BACKTEST_N_SPLITS_DEFAULT,
+    backtest_test_size: int = SARIMA_BACKTEST_TEST_SIZE_DEFAULT,
+    backtest_max_train_size: int | None = None,
+    backtest_refit_every: int = SARIMA_REFIT_EVERY_DEFAULT,
 ) -> tuple[pd.DataFrame, dict[str, Any], dict[str, Any]]:
     """
     Find optimal SARIMA parameters via exhaustive grid search.
@@ -104,6 +113,22 @@ def optimize_sarima_models(
     _validate_train_series_not_empty(train_series)
     _validate_seasonal_period(s)
 
+    if backtest_n_splits < 1:
+        raise ValueError("backtest_n_splits must be >= 1")
+    if backtest_test_size < 1:
+        raise ValueError("backtest_test_size must be >= 1")
+    if backtest_refit_every < 1:
+        raise ValueError("backtest_refit_every must be >= 1")
+
+    backtest_params = {
+        "n_splits": int(backtest_n_splits),
+        "test_size": int(backtest_test_size),
+        "max_train_size": (
+            None if backtest_max_train_size is None else int(backtest_max_train_size)
+        ),
+        "refit_every": int(backtest_refit_every),
+    }
+
     param_combinations = list(
         itertools.product(p_range, d_range, q_range, P_range, D_range, Q_range, [s])
     )
@@ -123,7 +148,10 @@ def optimize_sarima_models(
 
     # Use a single, consistent interpretation for parallelism across logging and execution
     results = _evaluate_sarima_models(
-        train_series, param_combinations, n_jobs=effective_n_jobs
+        train_series,
+        param_combinations,
+        n_jobs=effective_n_jobs,
+        backtest_params=backtest_params,
     )
     results_df = _prepare_optimization_results(results, len(param_combinations))
     best_aic_dict, best_bic_dict = _select_best_models(results_df)

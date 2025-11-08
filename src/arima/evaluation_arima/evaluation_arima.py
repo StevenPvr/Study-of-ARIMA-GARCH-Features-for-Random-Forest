@@ -9,8 +9,11 @@ from typing import Any, Iterable
 import numpy as np
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.model_selection import TimeSeriesSplit
 
 from src.constants import (
+    SARIMA_BACKTEST_N_SPLITS_DEFAULT,
+    SARIMA_BACKTEST_TEST_SIZE_DEFAULT,
     LJUNGBOX_RESIDUALS_SARIMA_FILE,
     LJUNGBOX_SIGNIFICANCE_LEVEL,
     RESULTS_DIR,
@@ -35,6 +38,7 @@ from .utils import (
     _plot_acf_on_axis,
     _predict_single_step,
     _prepare_lags_list,
+    _validate_series_not_empty,
     _validate_rolling_forecast_inputs,
 )
 
@@ -136,6 +140,87 @@ def rolling_forecast(
             logger.info(f"Rolling forecast: {i + 1}/{len(test_series)} completed")
 
     return np.array(predictions), np.array(actuals)
+
+
+def walk_forward_backtest(
+    series: pd.Series,
+    order: tuple[int, int, int],
+    seasonal_order: tuple[int, int, int, int],
+    *,
+    n_splits: int = SARIMA_BACKTEST_N_SPLITS_DEFAULT,
+    test_size: int = SARIMA_BACKTEST_TEST_SIZE_DEFAULT,
+    max_train_size: int | None = None,
+    refit_every: int = SARIMA_REFIT_EVERY_DEFAULT,
+) -> tuple[pd.DataFrame, dict[str, float]]:
+    """Run walk-forward backtesting using rolling forecasts on multiple splits."""
+
+    _validate_series_not_empty(series, "series")
+    if n_splits < 1 or test_size < 1:
+        raise ValueError(
+            f"n_splits and test_size must be >=1, got n_splits={n_splits}, test_size={test_size}"
+        )
+
+    ordered_series = _ensure_datetime_index(series.sort_index())
+    splitter = TimeSeriesSplit(
+        n_splits=int(n_splits),
+        test_size=int(test_size),
+        max_train_size=None if max_train_size is None else int(max_train_size),
+    )
+
+    rows: list[dict[str, Any]] = []
+    metric_history: dict[str, list[float]] = {}
+    split_idx = 0
+
+    try:
+        for split_idx, (train_idx, val_idx) in enumerate(
+            splitter.split(np.arange(len(ordered_series))), start=1
+        ):
+            train_slice = ordered_series.iloc[train_idx]
+            val_slice = ordered_series.iloc[val_idx]
+            preds, actuals = rolling_forecast(
+                train_slice,
+                val_slice,
+                order,
+                seasonal_order,
+                refit_every=refit_every,
+                verbose=False,
+            )
+            metrics = calculate_metrics(preds, actuals)
+            for name, value in metrics.items():
+                metric_history.setdefault(name.lower(), []).append(float(value))
+            rows.append(
+                {
+                    "split": split_idx,
+                    "train_start": train_slice.index[0],
+                    "train_end": train_slice.index[-1],
+                    "validation_start": val_slice.index[0],
+                    "validation_end": val_slice.index[-1],
+                    **metrics,
+                }
+            )
+    except ValueError as exc:
+        msg = (
+            "Cannot create walk-forward splits with "
+            f"n_splits={n_splits}, test_size={test_size}, series_length={len(ordered_series)}"
+        )
+        raise ValueError(msg) from exc
+
+    if split_idx == 0:
+        raise ValueError("No walk-forward splits were generated")
+
+    split_metrics = pd.DataFrame(rows)
+    summary: dict[str, float] = {}
+    for name, values in metric_history.items():
+        arr = np.asarray(values, dtype=float)
+        summary[f"{name}_mean"] = float(np.mean(arr))
+        summary[f"{name}_std"] = float(np.std(arr, ddof=0))
+
+    logger.info(
+        "Completed walk-forward backtest with %s splits (test_size=%s)",
+        len(split_metrics),
+        test_size,
+    )
+    return split_metrics, summary
 
 
 def calculate_metrics(predictions: np.ndarray, actuals: np.ndarray) -> dict[str, float]:

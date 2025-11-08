@@ -30,7 +30,24 @@ class TestOptimizeSarimaModels:
     def _assert_has_columns(results_df: pd.DataFrame) -> None:
         """Assert that DataFrame has required columns."""
         if hasattr(results_df, "columns"):
-            required_cols = ["p", "d", "q", "P", "D", "Q", "s", "aic", "bic"]
+            required_cols = [
+                "p",
+                "d",
+                "q",
+                "P",
+                "D",
+                "Q",
+                "s",
+                "aic",
+                "bic",
+                "backtest_mse_mean",
+                "backtest_mse_std",
+                "backtest_rmse_mean",
+                "backtest_rmse_std",
+                "backtest_mae_mean",
+                "backtest_mae_std",
+                "backtest_n_splits",
+            ]
             for col in required_cols:
                 assert col in results_df.columns
 
@@ -71,18 +88,78 @@ class TestOptimizeSarimaModels:
         mock_fitted.resid = _np.random.default_rng(123).normal(0.0, 1.0, size=200)
         mock_fit_sarima.return_value = mock_fitted
 
-        results_df, best_aic, best_bic = optimize_sarima_models(
-            train_series,
-            test_series,
-            p_range=range(2),
-            d_range=range(1),
-            q_range=range(2),
+        backtest_summary = {
+            "mse_mean": 0.1,
+            "mse_std": 0.01,
+            "rmse_mean": 0.2,
+            "rmse_std": 0.02,
+            "mae_mean": 0.15,
+            "mae_std": 0.03,
+        }
+        backtest_df = pd.DataFrame(
+            {
+                "split": [1, 2, 3],
+                "train_start": [
+                    pd.Timestamp("2020-01-01"),
+                    pd.Timestamp("2020-01-06"),
+                    pd.Timestamp("2020-01-11"),
+                ],
+                "train_end": [
+                    pd.Timestamp("2020-01-05"),
+                    pd.Timestamp("2020-01-10"),
+                    pd.Timestamp("2020-01-15"),
+                ],
+                "validation_start": [
+                    pd.Timestamp("2020-01-06"),
+                    pd.Timestamp("2020-01-11"),
+                    pd.Timestamp("2020-01-16"),
+                ],
+                "validation_end": [
+                    pd.Timestamp("2020-01-10"),
+                    pd.Timestamp("2020-01-15"),
+                    pd.Timestamp("2020-01-20"),
+                ],
+                "MSE": [0.1, 0.11, 0.12],
+                "RMSE": [0.2, 0.21, 0.22],
+                "MAE": [0.15, 0.16, 0.17],
+            }
         )
 
+        with patch(
+            "src.arima.evaluation_arima.evaluation_arima.walk_forward_backtest",
+            return_value=(backtest_df, backtest_summary),
+        ):
+            results_df, best_aic, best_bic = optimize_sarima_models(
+                train_series,
+                test_series,
+                p_range=range(2),
+                d_range=range(1),
+                q_range=range(2),
+                n_jobs=1,
+            )
+
         self._assert_results_dataframe(results_df)
-        required_keys = ["p", "d", "q", "P", "D", "Q", "s", "aic", "bic", "params"]
+        required_keys = [
+            "p",
+            "d",
+            "q",
+            "P",
+            "D",
+            "Q",
+            "s",
+            "aic",
+            "bic",
+            "params",
+            "backtest_mse_mean",
+            "backtest_rmse_mean",
+            "backtest_rmse_std",
+        ]
         self._assert_model_dict(best_aic, required_keys)
         self._assert_model_dict(best_bic, required_keys)
+        assert best_aic["backtest_mse_mean"] == pytest.approx(backtest_summary["mse_mean"])
+        assert best_bic["backtest_mse_mean"] == pytest.approx(backtest_summary["mse_mean"])
+        assert best_aic["backtest_rmse_mean"] == pytest.approx(backtest_summary["rmse_mean"])
+        assert best_bic["backtest_rmse_mean"] == pytest.approx(backtest_summary["rmse_mean"])
 
         mock_save.assert_called_once()
         assert mock_logger.info.call_count > 0
@@ -140,6 +217,26 @@ class TestOptimizeSarimaModels:
                 s=0,
             )
 
+        with pytest.raises(ValueError, match="backtest_n_splits must be >= 1"):
+            optimize_sarima_models(
+                train_series,
+                test_series,
+                p_range=range(1),
+                d_range=range(1),
+                q_range=range(1),
+                backtest_n_splits=0,
+            )
+
+        with pytest.raises(ValueError, match="backtest_test_size must be >= 1"):
+            optimize_sarima_models(
+                train_series,
+                test_series,
+                p_range=range(1),
+                d_range=range(1),
+                q_range=range(1),
+                backtest_test_size=0,
+            )
+
     @patch("src.arima.optimisation_arima.optimisation_arima._save_optimization_results")
     @patch("src.arima.optimisation_arima.utils.fit_sarima_model")
     def test_optimize_sarima_models_partial_convergence(
@@ -171,13 +268,55 @@ class TestOptimizeSarimaModels:
         mock_fit_sarima.side_effect = fit_sarima_side_effect
 
         # Execute
-        results_df, best_aic, best_bic = optimize_sarima_models(
-            train_series,
-            test_series,
-            p_range=range(2),
-            d_range=range(1),
-            q_range=range(2),
+        backtest_summary = {
+            "mse_mean": 0.05,
+            "mse_std": 0.005,
+            "rmse_mean": 0.1,
+            "rmse_std": 0.01,
+            "mae_mean": 0.08,
+            "mae_std": 0.02,
+        }
+        backtest_df = pd.DataFrame(
+            {
+                "split": [1, 2, 3],
+                "train_start": [
+                    pd.Timestamp("2020-01-01"),
+                    pd.Timestamp("2020-01-06"),
+                    pd.Timestamp("2020-01-11"),
+                ],
+                "train_end": [
+                    pd.Timestamp("2020-01-05"),
+                    pd.Timestamp("2020-01-10"),
+                    pd.Timestamp("2020-01-15"),
+                ],
+                "validation_start": [
+                    pd.Timestamp("2020-01-06"),
+                    pd.Timestamp("2020-01-11"),
+                    pd.Timestamp("2020-01-16"),
+                ],
+                "validation_end": [
+                    pd.Timestamp("2020-01-10"),
+                    pd.Timestamp("2020-01-15"),
+                    pd.Timestamp("2020-01-20"),
+                ],
+                "MSE": [0.05, 0.06, 0.07],
+                "RMSE": [0.1, 0.11, 0.12],
+                "MAE": [0.08, 0.085, 0.09],
+            }
         )
+
+        with patch(
+            "src.arima.evaluation_arima.evaluation_arima.walk_forward_backtest",
+            return_value=(backtest_df, backtest_summary),
+        ):
+            results_df, best_aic, best_bic = optimize_sarima_models(
+                train_series,
+                test_series,
+                p_range=range(2),
+                d_range=range(1),
+                q_range=range(2),
+                n_jobs=1,
+            )
 
         # Verify some results were saved
         assert len(results_df) > 0

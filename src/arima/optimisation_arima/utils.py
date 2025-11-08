@@ -217,6 +217,7 @@ def _test_sarima_model(
     D: int = 0,
     Q: int = 0,
     s: int = 12,
+    backtest_params: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """
     Test a single SARIMA model configuration.
@@ -262,6 +263,36 @@ def _test_sarima_model(
         result["lb_pvalue_last"] = lb_p_last
         result["lb_reject_5pct"] = lb_reject_5pct
         result["lb_lags"] = lb.get("lags", [])
+        if backtest_params is not None:
+            from src.arima.evaluation_arima.evaluation_arima import walk_forward_backtest
+
+            try:
+                _, summary = walk_forward_backtest(
+                    train_series,
+                    order=(p, d, q),
+                    seasonal_order=(P, D, Q, s),
+                    n_splits=int(backtest_params["n_splits"]),
+                    test_size=int(backtest_params["test_size"]),
+                    max_train_size=backtest_params.get("max_train_size"),
+                    refit_every=int(backtest_params["refit_every"]),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "Backtest failed for SARIMA(%s,%s,%s)(%s,%s,%s)[%s]: %s",
+                    p,
+                    d,
+                    q,
+                    P,
+                    D,
+                    Q,
+                    s,
+                    exc,
+                )
+            else:
+                for name, value in summary.items():
+                    result[f"backtest_{name}"] = float(value)
+                result["backtest_n_splits"] = int(backtest_params["n_splits"])
+                result["backtest_test_size"] = int(backtest_params["test_size"])
         return result
     except Exception as e:
         logger.debug(f"Model SARIMA({p},{d},{q})({P},{D},{Q})[{s}] failed: {e}")
@@ -277,6 +308,7 @@ def _test_single_model_wrapper(
     D: int,
     Q: int,
     s: int,
+    backtest_params: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """
     Wrapper function for testing a single model (for multiprocessing).
@@ -297,12 +329,13 @@ def _test_single_model_wrapper(
     # Reconstruct Series from pickled data
     values, index = train_series_data
     train_series = pd.Series(values, index=pd.DatetimeIndex(index))
-    return _test_sarima_model(train_series, p, d, q, P, D, Q, s)
+    return _test_sarima_model(train_series, p, d, q, P, D, Q, s, backtest_params)
 
 
 def _evaluate_models_sequential(
     train_series: pd.Series,
     param_combinations: list[tuple[int, int, int, int, int, int, int]],
+    backtest_params: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Evaluate SARIMA models sequentially.
@@ -316,7 +349,7 @@ def _evaluate_models_sequential(
     """
     sequential_results: list[dict[str, Any]] = []
     for idx, (p, d, q, P, D, Q, s) in enumerate(param_combinations, 1):
-        model_result = _test_sarima_model(train_series, p, d, q, P, D, Q, s)
+        model_result = _test_sarima_model(train_series, p, d, q, P, D, Q, s, backtest_params)
         if model_result is not None:
             sequential_results.append(model_result)
         if idx % 20 == 0:
@@ -363,6 +396,7 @@ def _evaluate_models_parallel(
     train_series: pd.Series,
     param_combinations: list[tuple[int, int, int, int, int, int, int]],
     n_jobs: int,
+    backtest_params: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Evaluate SARIMA models in parallel.
@@ -391,6 +425,7 @@ def _evaluate_models_parallel(
                 D,
                 Q,
                 s,
+                backtest_params,
             ): (p, d, q, P, D, Q, s)
             for p, d, q, P, D, Q, s in param_combinations
         }
@@ -402,6 +437,7 @@ def _evaluate_sarima_models(
     train_series: pd.Series,
     param_combinations: list[tuple[int, int, int, int, int, int, int]],
     n_jobs: int | None = None,
+    backtest_params: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Evaluate all SARIMA model combinations with optional parallelization.
@@ -415,11 +451,13 @@ def _evaluate_sarima_models(
         List of successful model results
     """
     if n_jobs == 1 or len(param_combinations) < 10:
-        return _evaluate_models_sequential(train_series, param_combinations)
+        return _evaluate_models_sequential(train_series, param_combinations, backtest_params)
 
     # Parallel execution
     effective_n_jobs = n_jobs if n_jobs is not None else max(1, cpu_count() - 1)
-    return _evaluate_models_parallel(train_series, param_combinations, effective_n_jobs)
+    return _evaluate_models_parallel(
+        train_series, param_combinations, effective_n_jobs, backtest_params
+    )
 
 
 def _build_best_model_dict(model_row: pd.Series) -> dict[str, Any]:
@@ -455,7 +493,11 @@ def _build_best_model_dict(model_row: pd.Series) -> dict[str, Any]:
     aic_value = float(model_row["aic"])
     bic_value = float(model_row["bic"])
 
-    return _build_model_result_dict(p, d, q, P, D, Q, s, aic_value, bic_value)
+    result = _build_model_result_dict(p, d, q, P, D, Q, s, aic_value, bic_value)
+    for col in model_row.index:
+        if col.startswith("backtest_"):
+            result[col] = float(model_row[col])
+    return result
 
 
 def _select_best_models(
