@@ -1,0 +1,84 @@
+# Méthodologie de Visualisation des Données S&P 500
+
+## Objectif
+
+Le module `data_visualisation` fournit des outils d'analyse exploratoire et de diagnostic visuel pour comprendre les caractéristiques des données financières et évaluer la qualité des modèles prédictifs.
+
+## Sous-modules actifs
+
+- `data_visualisation.py` : Fonctions principales de visualisation
+- `main.py` : Interface CLI pour génération de rapports visuels
+
+## Types de visualisations
+
+### Analyse univariée
+- **Histogrammes** : Distribution des rendements, volumes, volatilité
+- **Box plots** : Détection d'outliers et étendue des distributions
+- **Q-Q plots** : Test de normalité vs distribution théorique
+
+### Analyse bivariée/multivariée
+- **Scatter plots** : Corrélations entre variables
+- **Heatmaps** : Matrices de corrélation
+- **Pair plots** : Relations entre multiples variables
+
+### Analyse temporelle
+- **Time series plots** : Évolution temporelle des prix/rendements
+- **Rolling statistics** : Moyennes mobiles, volatilité glissante
+- **Seasonal decomposition** : Tendances, saisonnalité, résidus
+
+### Diagnostics de modèles
+- **Residuals analysis** : Distribution et autocorrélation des résidus
+- **Prediction vs actual** : Comparaison prédictions/réalité
+- **Error distribution** : Analyse des erreurs de prédiction
+
+## Principes méthodologiques
+
+### Clarté et lisibilité
+- Palettes de couleurs adaptées aux daltoniens
+- Tailles de police et contrastes optimaux
+- Légends et annotations explicites
+
+### Exhaustivité
+- Combinaisons multiples de variables pertinentes
+- Différentes échelles temporelles (journalier, hebdomadaire, mensuel)
+- Statistiques descriptives intégrées
+
+### Performance
+- Utilisation de matplotlib/seaborn pour rapidité
+- Sauvegarde en formats multiples (PNG, PDF, SVG)
+- Génération par batch pour gros volumes de données
+
+## Structure des rapports
+
+### Rapport exploratoire initial
+- Statistiques descriptives globales
+- Distributions par variable
+- Corrélations principales
+- Anomalies détectées
+
+### Rapport de diagnostic modèle
+- Performance prédictive (MSE, MAE, R²)
+- Analyse des résidus
+- Stabilité temporelle des erreurs
+- Comparaisons inter-modèles
+
+## Tests automatisés
+
+- Tests de génération de graphiques
+- Validation des formats de sortie
+- Tests de performance (temps de génération)
+- Vérification de la présence des éléments requis
+
+## Points de vigilance
+
+- **Performance** : Optimisation pour gros datasets
+- **Reproductibilité** : Seeds pour couleurs et layouts aléatoires
+- **Accessibilité** : Graphiques adaptés à différents supports
+- **Maintenance** : Code modulaire pour évolution des besoins
+
+## Sortie
+
+Le module génère des rapports visuels complets :
+- Format : PNG/PDF/SVG dans `plots/` organisé par catégories
+- Contenu : Graphiques + métadonnées statistiques
+- Utilité : Support décisionnel et communication des résultats

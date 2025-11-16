@@ -1,0 +1,113 @@
+# Méthodologie du Module Benchmark GARCH
+
+## Objectif
+
+Le module `benchmark` constitue l'étape finale du pipeline GARCH. Il compare les performances prédictives de la volatilité du modèle EGARCH entraîné contre des benchmarks classiques de l'industrie financière, établissant ainsi la valeur ajoutée du modèle dans un contexte de trading réaliste.
+
+## Sous-modules actifs
+
+- `bench_volatility.py` : Calculs des benchmarks de volatilité classiques
+- `benchmark_models.py` : Modèles de référence (EWMA, GARCH(1,1), etc.)
+- `data_utils.py` : Utilitaires de manipulation des données de volatilité
+- `forecasts.py` : Génération des prédictions de volatilité
+- `main_vol_backtest.py` : Orchestration du backtest complet
+- `metrics.py` : Métriques d'évaluation spécialisées finance
+- `model_comparison.py` : Comparaisons statistiques inter-modèles
+- `plotting.py` : Visualisations des résultats de backtest
+- `realized_vol_comparison.py` : Analyse de la volatilité réalisée
+- `realized_volatility.py` : Calculs de volatilité réalisée
+- `statistical_tests.py` : Tests statistiques de supériorité
+- `validation.py` : Validation des résultats de backtest
+
+## Déroulé du pipeline (`run_vol_backtest`)
+
+1. **Chargement des données**
+   - Récupération des résidus SARIMA (input du modèle GARCH)
+   - Chargement du modèle EGARCH entraîné
+   - Préparation des données de test (walk-forward)
+
+2. **Calcul des benchmarks**
+   - **EWMA (Exponentially Weighted Moving Average)** : λ = 0.94 (standard risque)
+   - **Volatilité réalisée** : Calcul sur fenêtres mobiles
+   - **GARCH(1,1) simple** : Modèle de référence basique
+   - **Volatilité historique** : Écart-type mobile simple
+
+3. **Génération des prédictions**
+   - Prédictions rolling du modèle EGARCH
+   - Prédictions des benchmarks sur la même période
+   - Alignement temporel parfait (pas de fuite de données)
+
+4. **Évaluation comparative**
+   - **Métriques principales** : QLIKE, MSE, MAE pour la volatilité
+   - **Métriques VaR** : Violation rates, Kupiec test, Christoffersen test
+   - **Tests statistiques** : Diebold-Mariano, Model Confidence Set (MCS)
+   - **Métriques économiques** : Sharpe ratio des stratégies basées sur volatilité
+
+## Benchmarks implémentés
+
+### Benchmarks de volatilité
+- **EWMA** : λ ∈ {0.94, 0.97, 0.99} (conservateur à très conservateur)
+- **Rolling volatility** : Fenêtres de 5, 10, 20, 63 jours
+- **Exponential smoothing** : Paramètres optimisés
+
+### Benchmarks de VaR
+- **Historical Simulation** : Fenêtres de 250 jours
+- **RiskMetrics** : EWMA avec λ = 0.94
+- **Parametric VaR** : Assumption normale sur volatilité prédite
+
+## Métriques d'évaluation
+
+### Métriques de volatilité
+- **QLIKE** : Quasi-likelihood (métrique principale pour volatilité)
+- **MSE/MAE** : Erreurs absolues et quadratiques
+- **R² de Mincer-Zarnowitz** : Calibration des prédictions
+
+### Métriques de Value-at-Risk
+- **Violation rate** : Taux d'exceptions observé vs théorique
+- **Kupiec test** : Test de proportion inconditionnel
+- **Christoffersen test** : Test de proportion conditionnel
+- **Dynamic Quantile test** : Test de quantile dynamique
+
+### Tests de supériorité
+- **Diebold-Mariano test** : Comparaison de pertes prédictives
+- **Model Confidence Set (MCS)** : Ensemble de modèles statistiquement équivalents
+- **SPA test** : Test de supériorité prédictive
+
+## Principes méthodologiques clés
+
+### Comparaison équitable
+- Même période d'évaluation pour tous les modèles
+- Même fréquence de réestimation (pas de refit pour benchmarks)
+- Alignement temporel parfait des prédictions
+
+### Robustesse statistique
+- Tests multiples pour éviter les conclusions spurieuses
+- Correction pour tests multiples
+- Analyse de stabilité temporelle des performances
+
+### Pertinence économique
+- Métriques alignées avec les besoins des praticiens
+- Évaluation des stratégies de trading réalistes
+- Focus sur la valeur ajoutée marginale
+
+## Tests automatisés
+
+- Tests unitaires sur les calculs de chaque benchmark
+- Tests d'intégration pour le pipeline complet
+- Validation des propriétés statistiques des métriques
+- Tests de cohérence temporelle
+
+## Points de vigilance
+
+- **Choix des benchmarks** : Sélection de références pertinentes et actuelles
+- **Fréquence d'évaluation** : Alignement avec les horizons de trading
+- **Saisonnalité** : Considération des effets saisonniers dans la volatilité
+- **Robustesse** : Validation sur différentes périodes de marché
+
+## Sortie
+
+Le module produit un rapport complet de benchmarking :
+- **Tableaux comparatifs** : Performance de tous les modèles
+- **Graphiques** : Évolution temporelle des prédictions
+- **Tests statistiques** : Supériorité relative démontrée
+- **Conclusions** : Valeur ajoutée du modèle EGARCH établie

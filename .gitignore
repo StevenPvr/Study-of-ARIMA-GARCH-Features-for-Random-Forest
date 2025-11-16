@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+SP_Forecasting/
+venv/
+ENV/
+
+# Data
+# Ignore all files in data/
+data/*
+!data/.gitkeep
+
+# Ignore parquet files everywhere
+*.parquet
+
+# Results and plots
+# results/ and plots/ are now tracked in git
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Models
+*.joblib
+*.pkl
+*.h5

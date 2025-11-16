@@ -1,0 +1,359 @@
+================================================================================
+                    MÉTHODOLOGIE DU MODULE ARIMA
+            Prévision des Rendements Pondérés du S&P 500
+================================================================================
+
+OBJECTIF GÉNÉRAL
+----------------
+Ce module implémente une analyse de séries temporelles complète utilisant le
+modèle SARIMA (Seasonal AutoRegressive Integrated Moving Average) pour
+prédire les rendements logarithmiques pondérés du portefeuille S&P 500.
+
+
+ARCHITECTURE DU PIPELINE
+------------------------
+Le pipeline se compose de 5 étapes séquentielles, chacune produisant des
+résultats utilisés par l'étape suivante :
+
+    Données → Stationnarité → Visualisation → Optimisation → Entraînement → Évaluation
+
+
+================================================================================
+ÉTAPE 1 : VÉRIFICATION DE LA STATIONNARITÉ
+================================================================================
+
+OBJECTIF
+--------
+Vérifier que les données respectent les hypothèses du modèle ARIMA, notamment
+que la série temporelle est stationnaire (moyenne et variance constantes).
+
+MÉTHODOLOGIE
+------------
+• Agrégation hebdomadaire : Les rendements quotidiens sont sommés par semaine
+  pour réduire le bruit et stabiliser les statistiques
+
+• Triple test statistique :
+  1. Test ADF (Augmented Dickey-Fuller) : Détecte la présence d'une racine
+     unitaire (non-stationnarité)
+
+  2. Test KPSS (Kwiatkowski-Phillips-Schmidt-Shin) : Teste la stationnarité
+     autour d'une tendance
+
+  3. Test de Zivot-Andrews : Identifie les ruptures structurelles dans la série
+     (changements de régime économique)
+
+• Verdict de stationnarité : La série est considérée stationnaire si :
+  - Le test ADF rejette l'hypothèse de racine unitaire (p-value < 0.05)
+  - ET le test KPSS accepte l'hypothèse de stationnarité (p-value > 0.05)
+
+RÉSULTATS
+---------
+Rapport JSON contenant les p-values de chaque test et le verdict final.
+
+
+================================================================================
+ÉTAPE 2 : VISUALISATION EXPLORATOIRE
+================================================================================
+
+OBJECTIF
+--------
+Générer des graphiques permettant de comprendre visuellement les
+caractéristiques de la série temporelle.
+
+VISUALISATIONS PRODUITES
+-------------------------
+1. Série temporelle des rendements logarithmiques hebdomadaires
+
+2. Fonctions d'autocorrélation (ACF/PACF) :
+   - ACF : Corrélation entre la série et ses valeurs passées
+   - PACF : Corrélation directe (sans influence des lags intermédiaires)
+   - Ces graphiques guident le choix des ordres p et q du modèle
+
+3. Analyse de stationnarité :
+   - Moyenne mobile et écart-type mobile sur fenêtres glissantes
+   - Visualisation de la stabilité temporelle
+
+4. Décomposition saisonnière :
+   - Séparation de la série en tendance, saisonnalité et résidus
+   - Analyse sur plusieurs échelles temporelles (quotidienne, mensuelle)
+
+UTILITÉ
+-------
+Ces visualisations permettent une validation qualitative des tests statistiques
+et une compréhension intuitive des patterns temporels.
+
+
+================================================================================
+ÉTAPE 3 : OPTIMISATION DES HYPERPARAMÈTRES
+================================================================================
+
+OBJECTIF
+--------
+Trouver la meilleure configuration de paramètres pour le modèle SARIMA.
+
+PARAMÈTRES OPTIMISÉS
+--------------------
+Le modèle SARIMA(p,d,q)(P,D,Q,s) possède 7 hyperparamètres :
+
+• Composante non-saisonnière :
+  - p : Ordre autorégressif (combien de valeurs passées utiliser)
+  - d : Ordre de différenciation (rendre la série stationnaire)
+  - q : Ordre moyenne mobile (combien d'erreurs passées utiliser)
+
+• Composante saisonnière :
+  - P : Ordre autorégressif saisonnier
+  - D : Ordre de différenciation saisonnière
+  - Q : Ordre moyenne mobile saisonnière
+  - s : Période saisonnière (5=hebdo, 20=mensuel, 63=trimestriel, 252=annuel)
+
+ESPACES DE RECHERCHE
+---------------------
+- p : [0, 5]
+- d : [0, 2]
+- q : [0, 5]
+- P : [0, 2]
+- D : [0, 1]
+- Q : [0, 2]
+- s : {1, 5, 20, 63, 252} (pas de saisonnalité à annuelle)
+
+MÉTHODOLOGIE D'OPTIMISATION
+----------------------------
+• Algorithme : Optimisation bayésienne via Optuna (TPE - Tree-structured
+  Parzen Estimator)
+
+• Approche double critère :
+  - Une optimisation séparée pour minimiser l'AIC
+  - Une optimisation séparée pour minimiser le BIC
+  - Déduplication et comparaison des résultats
+
+• Critères d'évaluation :
+  1. AIC (Akaike Information Criterion) : Pénalise moins la complexité
+  2. BIC (Bayesian Information Criterion) : Pénalise plus fortement la complexité
+
+  Formule : -2*log(likelihood) + k*penalty
+  où k = nombre de paramètres
+
+• Nombre d'essais : 4 au total par défaut (2 pour AIC, 2 pour BIC)
+  Peut être augmenté via --trials pour une recherche plus exhaustive
+
+• Validation des résidus : Test de Ljung-Box utilisé comme filtre de qualité
+  (modèles avec p-value >= 0.05 privilégiés)
+
+• Validation croisée temporelle : Walk-forward validation avec métriques
+  RMSE/MAE combinées aux critères AIC/BIC (score composite)
+
+• Contraintes de stabilité : Vérification de stationnarité et invertibilité
+  des paramètres (racines des polynômes AR/MA hors du cercle unité)
+
+PRINCIPE CLÉ
+------------
+L'optimisation combine critères informationnels (AIC/BIC) et performance
+prédictive (RMSE/MAE) via validation croisée temporelle walk-forward.
+Cette approche équilibrée évite le surapprentissage tout en privilégiant
+les modèles performants.
+
+RÉSULTATS
+---------
+- Fichier CSV avec tous les essais et leurs performances
+- JSON avec les meilleurs modèles (AIC et BIC)
+- Filtrage automatique des modèles par test de Ljung-Box (qualité des résidus)
+
+
+================================================================================
+ÉTAPE 4 : ENTRAÎNEMENT DU MODÈLE FINAL
+================================================================================
+
+OBJECTIF
+--------
+Entraîner le modèle SARIMA avec les meilleurs hyperparamètres trouvés.
+
+MÉTHODOLOGIE
+------------
+1. Chargement des meilleurs paramètres (choix entre critère AIC ou BIC)
+2. Entraînement du modèle sur l'ensemble d'entraînement complet
+3. Sauvegarde du modèle entraîné (format pickle)
+4. Sauvegarde des métadonnées (paramètres, critères, date)
+
+ANTI-FUITE DE DONNÉES
+----------------------
+Le modèle est entraîné UNIQUEMENT sur le split d'entraînement. Aucune
+information du set de test n'est utilisée.
+
+RÉSULTATS
+---------
+- Modèle entraîné prêt pour l'évaluation
+- Métadonnées pour traçabilité et reproductibilité
+
+
+================================================================================
+ÉTAPE 5 : ÉVALUATION ET DIAGNOSTICS
+================================================================================
+
+OBJECTIF
+--------
+Évaluer rigoureusement la performance du modèle et diagnostiquer sa qualité.
+
+MÉTHODOLOGIE D'ÉVALUATION
+--------------------------
+
+1. PRÉVISIONS GLISSANTES (Rolling Forecast)
+   ----------------------------------------
+   • Principe : Prévisions à un pas en avant sur l'ensemble de test
+
+   • Ré-entraînement périodique : Le modèle est réajusté tous les 20 points
+     pour s'adapter à l'évolution de la série
+
+   • Métriques calculées :
+     - MSE (Mean Squared Error) : Erreur quadratique moyenne
+     - RMSE (Root Mean Squared Error) : Racine de l'erreur quadratique moyenne
+     - MAE (Mean Absolute Error) : Erreur absolue moyenne
+
+   • Avantage : Simule un scénario de trading réaliste avec mises à jour régulières
+
+
+2. VALIDATION CROISÉE TEMPORELLE (Walk-Forward)
+   ---------------------------------------------
+   • Principe : Validation croisée respectant l'ordre temporel (pas de mélange)
+
+   • Configuration :
+     - 5 splits temporels
+     - Taille de test fixe : 21 jours par split
+     - Expansion de l'ensemble d'entraînement à chaque split
+
+   • Avantage : Estimation robuste de la performance sur différentes périodes
+
+
+3. ANALYSE DES RÉSIDUS
+   --------------------
+   Les résidus doivent se comporter comme un bruit blanc pour valider le modèle.
+
+   Tests effectués :
+
+   • Test de Ljung-Box :
+     - Hypothèse : Les résidus ne sont pas autocorrélés
+     - Interprétation : p-value > 0.05 → résidus valides
+
+   • Tests de normalité (Jarque-Bera, Shapiro-Wilk, Anderson-Darling) :
+     - Hypothèse : Les résidus suivent une loi normale
+     - Importance : Validité des intervalles de confiance
+
+   • Graphique ACF des résidus :
+     - Visualisation : Les barres doivent rester dans les bandes de confiance
+     - Indication : Pas de structure temporelle restante
+
+
+4. PRÉPARATION POUR GARCH
+   -----------------------
+   • Extraction des résidus standardisés
+
+   • Calcul des prévisions glissantes
+
+   • Sauvegarde pour le module de modélisation de la volatilité
+
+   • Principe : Les résidus ARIMA servent d'entrée au modèle GARCH qui
+     modélise leur volatilité conditionnelle
+
+
+RÉSULTATS
+---------
+- Métriques de performance quantitatives
+- Graphiques de diagnostics
+- Tests statistiques sur les résidus
+- Données préparées pour l'étape suivante (GARCH)
+
+
+================================================================================
+PRINCIPES MÉTHODOLOGIQUES CLÉS
+================================================================================
+
+1. ABSENCE DE FUITE DE DONNÉES (No Data Leakage)
+   ----------------------------------------------
+   Séparation stricte train/test maintenue à chaque étape. Le modèle ne voit
+   jamais les données de test pendant l'optimisation et l'entraînement.
+
+
+2. OPTIMISATION CONSERVATRICE
+   ---------------------------
+   Utilisation des critères AIC/BIC plutôt que de la performance hors-échantillon
+   pour éviter le surapprentissage à des périodes spécifiques.
+
+
+3. VALIDATION TEMPORELLE
+   ----------------------
+   Toutes les validations respectent l'ordre chronologique (pas de mélange
+   aléatoire) car les séries temporelles ont une structure temporelle importante.
+
+
+4. CONTRAINTES DE STABILITÉ
+   --------------------------
+   Vérification automatique que les paramètres respectent les conditions
+   de stationnarité et invertibilité (pendant l'optimisation et l'évaluation).
+
+
+5. FILTRAGE QUALITÉ
+   -----------------
+   Sélection automatique des modèles dont les résidus passent le test
+   de Ljung-Box (absence d'autocorrélation résiduelle).
+
+6. REPRODUCTIBILITÉ
+   -----------------
+   Seeds aléatoires fixés, paramètres sauvegardés, pipeline modulaire permettant
+   de rejouer chaque étape indépendamment.
+
+7. INTÉGRATION PIPELINE
+   --------------------
+   Le module ARIMA s'intègre dans un pipeline plus large :
+   - Input : Données préparées par les modules upstream
+   - Output : Résidus pour modélisation GARCH de la volatilité
+   - Parallèle : Travaille en synergie avec LightGBM pour ensemble modeling
+
+
+================================================================================
+INTERPRÉTATION DES RÉSULTATS
+================================================================================
+
+CRITÈRES DE QUALITÉ D'UN BON MODÈLE ARIMA
+------------------------------------------
+
+1. Respect des contraintes de stabilité (stationnarité/invertibilité)
+2. Résidus non autocorrélés (Test Ljung-Box : p > 0.05) - filtré automatiquement
+3. Score composite équilibré (AIC/BIC + RMSE validation)
+4. Résidus approximativement normaux (pour IC valides)
+5. RMSE faible et stable sur validation croisée temporelle
+6. Paramètres interprétables (pas de surajustement avec p,q très élevés)
+
+
+CHOIX ENTRE AIC ET BIC
+-----------------------
+• AIC : Favorise les modèles légèrement plus complexes
+  → Meilleur pour la prédiction si données abondantes
+
+• BIC : Pénalise davantage la complexité
+  → Meilleur pour l'interprétation et la parcimonie
+
+
+LIMITES DU MODÈLE ARIMA
+------------------------
+• Suppose une relation linéaire entre passé et futur
+• Peut mal capturer les changements de régime abrupts
+• Hypothèse de normalité des erreurs parfois violée dans la finance
+• Volatilité constante (d'où l'utilisation de GARCH en complément)
+
+
+================================================================================
+CONCLUSION
+================================================================================
+
+Ce module implémente une méthodologie statistique rigoureuse pour la prévision
+de séries temporelles financières. L'approche combine :
+
+- Tests statistiques formels (stationnarité, diagnostics)
+- Optimisation systématique des hyperparamètres
+- Validation temporelle sans fuite de données
+- Diagnostics complets des résidus
+- Intégration dans un pipeline de prédiction plus large
+
+L'ensemble constitue un framework professionnel et reproductible pour la
+modélisation ARIMA de séries financières.
+
+================================================================================
