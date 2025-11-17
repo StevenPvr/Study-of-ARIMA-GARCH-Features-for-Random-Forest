@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 import pandas as pd
+from statsmodels.tsa.seasonal import seasonal_decompose
 
+from src.constants import (
+    ARIMA_SEASONALITY_DAILY_PERIOD,
+    ARIMA_SEASONALITY_MONTHLY_PERIOD,
+)
 from src.utils import get_logger
 from src.visualization import (
     add_grid,
@@ -174,3 +180,85 @@ def add_stationarity_text_box(ax: Axes, test_text: str) -> None:
         bbox=dict(boxstyle="round", facecolor="wheat", alpha=_PLOT_ALPHA_DEFAULT, edgecolor="black"),
         family="monospace",
     )
+
+
+def plot_seasonal_decomposition_daily(
+    series: pd.Series,
+    *,
+    model: str = "additive",
+) -> tuple[Figure, tuple[Axes, ...]]:
+    """Plot seasonal decomposition using the daily window.
+
+    Args:
+        series: Input time series indexed by date.
+        model: seasonal_decompose model type ("additive" or "multiplicative").
+
+    Returns:
+        Tuple with the Matplotlib figure and axes created by statsmodels.
+
+    Raises:
+        ValueError: If the provided series is empty.
+    """
+
+    if series.empty:
+        msg = "Series is empty; cannot compute daily decomposition"
+        raise ValueError(msg)
+
+    decomposition = seasonal_decompose(
+        series,
+        model=model,
+        period=ARIMA_SEASONALITY_DAILY_PERIOD,
+        extrapolate_trend="freq",
+    )
+    fig = decomposition.plot()
+    fig.suptitle(
+        "Décomposition saisonnière – fenêtre quotidienne",
+        fontsize=_FONTSIZE_SUBTITLE,
+        fontweight="bold",
+    )
+    axes = tuple(fig.axes)
+    for axis in axes:
+        add_grid(axis, alpha=_PLOT_ALPHA_LIGHT, linestyle="--")
+        _format_date_axis(axis)
+    return fig, axes
+
+
+def plot_seasonal_decomposition_monthly(
+    series: pd.Series,
+    *,
+    model: str = "additive",
+) -> tuple[Figure, tuple[Axes, ...]]:
+    """Plot seasonal decomposition using the monthly window.
+
+    Args:
+        series: Input time series indexed by date.
+        model: seasonal_decompose model type ("additive" or "multiplicative").
+
+    Returns:
+        Tuple with the Matplotlib figure and axes created by statsmodels.
+
+    Raises:
+        ValueError: If the provided series is empty.
+    """
+
+    if series.empty:
+        msg = "Series is empty; cannot compute monthly decomposition"
+        raise ValueError(msg)
+
+    decomposition = seasonal_decompose(
+        series,
+        model=model,
+        period=ARIMA_SEASONALITY_MONTHLY_PERIOD,
+        extrapolate_trend="freq",
+    )
+    fig = decomposition.plot()
+    fig.suptitle(
+        "Décomposition saisonnière – fenêtre mensuelle",
+        fontsize=_FONTSIZE_SUBTITLE,
+        fontweight="bold",
+    )
+    axes = tuple(fig.axes)
+    for axis in axes:
+        add_grid(axis, alpha=_PLOT_ALPHA_LIGHT, linestyle="--")
+        _format_date_axis(axis)
+    return fig, axes

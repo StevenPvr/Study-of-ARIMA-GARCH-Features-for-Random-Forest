@@ -76,6 +76,11 @@ VISUALISATIONS PRODUITES
 4. Décomposition saisonnière :
    - Séparation de la série en tendance, saisonnalité et résidus
    - Analyse sur plusieurs échelles temporelles (quotidienne, mensuelle)
+   - Paramétrage : seasonal_decompose (statsmodels) appliqué sur la dernière année
+     calendaire disponible (via load_series_for_year) avec deux fenêtres fixes :
+       • 5 jours ouvrés pour capter la saisonnalité intra-semaine
+       • 21 jours ouvrés pour capter les patterns intra-mois
+   - Les figures sont archivées dans plots/arima/saisonnalite pour traçabilité
 
 UTILITÉ
 -------
