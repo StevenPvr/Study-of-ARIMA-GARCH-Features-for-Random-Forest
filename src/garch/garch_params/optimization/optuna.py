@@ -10,7 +10,7 @@ This module implements:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 import optuna
@@ -213,12 +213,14 @@ def optimize_egarch_hyperparameters(
     resid_train: Any,
     *,
     n_trials: int | None = None,
+    initial_trials: Sequence[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Optimize EGARCH hyperparameters using Optuna.
 
     Args:
         resid_train: Training residuals (TRAIN split only).
         n_trials: Number of Optuna trials. Defaults to GARCH_OPTIMIZATION_N_TRIALS.
+        initial_trials: Optional warm-start trials to enqueue before random sampling.
 
     Returns:
         Dictionary with best hyperparameters and optimization results.
@@ -232,7 +234,15 @@ def optimize_egarch_hyperparameters(
     np.random.seed(DEFAULT_RANDOM_STATE)
 
     study = _create_optuna_study()
-    _run_optuna_study(study, resid_train, n_trials)
+
+    total_trials = n_trials
+    if initial_trials:
+        for idx, params in enumerate(initial_trials, start=1):
+            logger.info("Queueing warm-start trial %d/%d: %s", idx, len(initial_trials), params)
+            study.enqueue_trial(params)
+        total_trials += len(initial_trials)
+
+    _run_optuna_study(study, resid_train, total_trials)
 
     best_trial = study.best_trial
     _validate_best_trial(best_trial)

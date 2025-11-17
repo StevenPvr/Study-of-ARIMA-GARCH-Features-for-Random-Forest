@@ -71,20 +71,22 @@ Le pipeline GARCH se décompose en 7 ÉTAPES principales :
 
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  ÉTAPE 2a : ESTIMATION BATCH DES PARAMÈTRES                            │
-│  Module : garch_params/estimation_batch.py                              │
+│  Module : garch_params/main.py --stage estimation                       │
 ├─────────────────────────────────────────────────────────────────────────┤
 │  • Estimation MLE (Maximum Likelihood) pour 3 distributions :          │
 │    - Normal                                                             │
 │    - Student-t (capture queues épaisses)                               │
 │    - Skew-t (capture asymétrie et queues épaisses)                     │
 │  • Modèle : EGARCH(1,1) sur données TRAIN                              │
-│  • Méthode : L-BFGS-B avec contraintes de stationnarité               │
-│  • Sortie : results/garch/estimation/estimation.json                   │
+│  • Méthode : Optimiseur SLSQP (MLE) via estimate_egarch_mle            │
+│  • Diagnostics sauvegardés : log-likelihood, convergence, AIC/BIC      │
+│  • Sortie : results/garch/estimation/estimation.json (atomic write)    │
+│  • Rôle : Baseline officielle injectée dans la phase d'optimisation    │
 └─────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  ÉTAPE 2b : OPTIMISATION DES HYPERPARAMÈTRES                           │
-│  Module : garch_params/optimization/                                    │
+│  Module : garch_params/main.py --stage optimization                     │
 ├─────────────────────────────────────────────────────────────────────────┤
 │  • Recherche des hyperparamètres optimaux via Optuna :                 │
 │    - Orders EGARCH : (o, p) ∈ {(1,1), (1,2), (2,1), (2,2), ...}       │
@@ -99,6 +101,12 @@ Le pipeline GARCH se décompose en 7 ÉTAPES principales :
 │                                                                         │
 │  • QLIKE = moyenne[(ε²ₜ/σ²ₜ) - log(ε²ₜ/σ²ₜ) - 1]                      │
 │                                                                         │
+│  • Warm-start : les diagnostics de l'étape 2a sont chargés depuis      │
+│    results/garch/estimation/estimation.json. Chaque distribution       │
+│    produit un essai pré-queue dans Optuna (EGARCH(1,1) expanding,      │
+│    refit minimal).                                                     │
+│  • Traçabilité : si le fichier d'estimation manque, un warning est     │
+│    journalisé avant l'optimisation.                                    │
 │  • Sortie : results/garch/optimization/optimization_results.json       │
 └─────────────────────────────────────────────────────────────────────────┘
 
