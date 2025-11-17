@@ -16,6 +16,8 @@ from collections.abc import Callable
 from pathlib import Path
 import sys
 
+import matplotlib.pyplot as plt
+
 
 # Add project root to Python path for direct execution
 _script_dir = Path(__file__).parent
@@ -23,7 +25,7 @@ _project_root = _script_dir.parent.parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from src.arima.data_visualisation.data_loading import load_and_validate_data
+from src.arima.data_visualisation.data_loading import load_and_validate_data, load_series_for_year
 
 # Import all visualization functions from submodules
 from src.arima.data_visualisation.pre_modeling import (
@@ -32,6 +34,10 @@ from src.arima.data_visualisation.pre_modeling import (
     plot_stationarity,
     plot_stationarity_timeseries_with_bands,
     plot_weighted_series,
+)
+from src.arima.data_visualisation.plotting import (
+    plot_seasonal_decomposition_daily,
+    plot_seasonal_decomposition_monthly,
 )
 from src.arima.data_visualisation.residual_diagnostics import (
     plot_comprehensive_residuals,
@@ -43,6 +49,7 @@ from src.arima.data_visualisation.residual_diagnostics import (
 from src.constants import (
     ARIMA_DATA_VISU_PLOTS_DIR,
     ARIMA_EVALUATION_PLOTS_DIR,
+    ARIMA_SEASONALITY_PLOTS_DIR,
     STATIONARITY_ROLLING_WINDOW_DEFAULT,
     WEIGHTED_LOG_RETURNS_FILE,
 )
@@ -67,6 +74,43 @@ __all__ = [
     "plot_comprehensive_residuals",
     # Model performance - imported locally to avoid circular imports
 ]
+
+
+def _generate_seasonality_plots(data_file: str) -> None:
+    """Generate daily and monthly seasonal decomposition plots.
+
+    Args:
+        data_file: Path to the weighted log returns CSV.
+
+    Raises:
+        ValueError: If the dataset does not contain any observations.
+    """
+
+    dataframe = load_and_validate_data(data_file, "weighted_log_return")
+    if dataframe.empty:
+        msg = "Dataset is empty; cannot generate seasonality plots"
+        raise ValueError(msg)
+
+    target_year = int(dataframe.index.max().year)
+    logger.info("Generating seasonal decomposition for %s", target_year)
+    series = load_series_for_year(
+        year=target_year,
+        data_file=data_file,
+        column="weighted_log_return",
+    )
+
+    ARIMA_SEASONALITY_PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+    daily_path = ARIMA_SEASONALITY_PLOTS_DIR / f"seasonality_daily_{target_year}.png"
+    fig_daily, _ = plot_seasonal_decomposition_daily(series)
+    fig_daily.savefig(daily_path, bbox_inches="tight")
+    plt.close(fig_daily)
+    logger.info("Daily seasonal decomposition saved to %s", daily_path)
+
+    monthly_path = ARIMA_SEASONALITY_PLOTS_DIR / f"seasonality_monthly_{target_year}.png"
+    fig_monthly, _ = plot_seasonal_decomposition_monthly(series)
+    fig_monthly.savefig(monthly_path, bbox_inches="tight")
+    plt.close(fig_monthly)
+    logger.info("Monthly seasonal decomposition saved to %s", monthly_path)
 
 
 def _execute_plot(
@@ -139,6 +183,12 @@ def generate_pre_modeling_plots() -> None:
             alpha=0.05,
         ),
         "Failed to plot stationarity",
+        raise_on_error=True,
+    )
+
+    _execute_plot(
+        lambda: _generate_seasonality_plots(str(WEIGHTED_LOG_RETURNS_FILE)),
+        "Failed to plot seasonal decomposition",
         raise_on_error=True,
     )
 
