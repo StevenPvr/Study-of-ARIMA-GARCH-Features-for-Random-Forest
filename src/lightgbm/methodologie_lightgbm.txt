@@ -10,27 +10,34 @@ Prédiction de la Volatilité Boursière par Machine Learning
 Le module LightGBM prédit la volatilité future des actions du S&P 500 en
 utilisant un algorithme de gradient boosting (LightGBM). L'objectif est de
 prévoir la volatilité à J+1 (lendemain) en s'appuyant sur :
-- Des indicateurs techniques (volume, rendements, turnover)
-- Des insights GARCH (variance conditionnelle du modèle GARCH)
+- Des indicateurs techniques (volume, rendements, turnover, calendaires)
+- Des insights GARCH/ARIMA (variance conditionnelle, résidus, prédictions)
 - L'historique récent (lags de 1, 2 et 3 jours)
+- Études d'ablation pour comprendre l'apport relatif de chaque source d'information
 
 ================================================================================
 2. ARCHITECTURE ET FLUX DE TRAVAIL
 ================================================================================
 
-Le processus se déroule en 5 phases séquentielles :
+Le processus se déroule en 8 phases séquentielles avec modules spécialisés :
 
    Données brutes
         ↓
-   [1. Préparation des données]
+   [1. Préparation des données] (data_preparation/)
         ↓
-   [2. Analyse de corrélation] (optionnel)
+   [2. Vérification fuite données] (data_leakage_checkup/) - NOUVEAU
         ↓
-   [3. Optimisation des hyperparamètres]
+   [3. Analyse de corrélation] (correlation/) - optionnel
         ↓
-   [4. Entraînement des modèles]
+   [4. Optimisation des hyperparamètres] (optimisation/)
         ↓
-   [5. Évaluation et interprétabilité]
+   [5. Entraînement des modèles] (training/)
+        ↓
+   [6. Évaluation et interprétabilité] (eval/)
+        ↓
+   [7. Analyse de permutation] (permutation/) - NOUVEAU
+        ↓
+   [8. Baseline de comparaison] (baseline/) - optionnel
 
 ================================================================================
 3. PHASE 1 : PRÉPARATION DES DONNÉES (data_preparation/)
@@ -49,11 +56,13 @@ a) Chargement et normalisation
 
 b) Calcul des indicateurs techniques
    - Volume : log_volume, volume relatif aux moyennes mobiles (5 et 20j),
-              z-scores de volume
-   - Rendements : log_return, valeur absolue, carré des rendements
+              z-scores de volume, volume ratio
+   - Rendements : log_return, valeur absolue, carré des rendements, volatilité
    - Turnover : volume × prix, relatif aux moyennes mobiles
+   - Indicateurs classiques : RSI (14j), SMA/EMA (20j), MACD
    - OBV (On-Balance Volume) : momentum basé sur le volume
-   - Calendrier : jour de la semaine, mois, fin de mois, position dans le mois
+   - Calendrier : jour de la semaine, mois, trimestre, fin de mois, position dans le mois
+   - Momentum : indicateurs de tendance sur différentes fenêtres
 
 c) Création de la cible (anti-fuite de données)
    - Variable à prédire : log_volatility (volatilité logarithmique)
@@ -63,41 +72,61 @@ c) Création de la cible (anti-fuite de données)
 d) Ajout des lags (historique récent)
    - Fenêtres : 1, 2 et 3 jours dans le passé
    - Variables concernées :
-     * log_volatility, log_return, abs_ret, ret_sq
-     * Indicateurs de volume et turnover
-     * Insights GARCH : sigma2, sigma, résidus, prédictions ARIMA
-   - Groupement par ticker pour éviter la contamination entre actions
+     * Cible : log_volatility (et ses lags)
+     * Rendements : log_return, abs_return, return_squared
+     * Indicateurs techniques : RSI, volume, turnover, MACD, etc.
+     * Insights GARCH/ARIMA : sigma2_garch, std_resid_garch, arima_residual, etc.
+   - Groupement par ticker pour éviter la contamination inter-actions
+   - Application APRÈS création de la cible pour garantir l'ordre causal
 
 e) Nettoyage final
    - Suppression des valeurs manquantes
    - Validation de l'ordre temporel
    - Sauvegarde en Parquet (efficace) et CSV (lisible)
 
-3.2 LES 5 VARIANTES DE DATASETS
+3.2 LES 7 VARIANTES DE DATASETS
 --------------------------------
 
-Pour comprendre l'apport de chaque type de features, 5 datasets sont créés :
+Pour comprendre l'apport de chaque type de features, 7 datasets sont créés :
 
-1. COMPLET : Tous les indicateurs + insights GARCH + lags
-   → Modèle le plus riche
+1. COMPLET : Tous les indicateurs techniques + insights GARCH/ARIMA + lags
+   → Modèle le plus riche et performant attendu
 
 2. SANS INSIGHTS : Uniquement indicateurs techniques + lags
-   → Évalue l'apport du GARCH
+   → Évalue l'apport marginal des insights GARCH/ARIMA
 
 3. SIGMA PLUS BASE : Insights GARCH + log_volatility avec lags
-   → Évalue l'apport des indicateurs techniques
+   → Évalue l'apport des indicateurs techniques aux insights
 
-4. LOG VOLATILITY SEULEMENT : Baseline minimal avec uniquement log_volatility
+4. LOG VOLATILITY SEULEMENT : Baseline minimal avec uniquement log_volatility + lags
    → Modèle de référence (autocorrélation pure)
 
 5. INSIGHTS SEULEMENT : Uniquement insights GARCH/ARIMA + lags
-   → Évalue si GARCH seul suffit
+   → Évalue si les modèles économétriques suffisent seuls
 
-Ces variantes permettent des études d'ablation pour identifier les features
-les plus importantes.
+6. TECHNICAL ONLY (NO TARGET LAGS) : Indicateurs techniques sans lags de target
+   → Pour études de permutation importance
+
+7. TECHNICAL + INSIGHTS (NO TARGET LAGS) : Tout sauf lags de target
+   → Pour analyses comparatives sans contamination temporelle
+
+Ces variantes permettent des études d'ablation rigoureuses pour identifier
+les contributions relatives de chaque famille de features.
 
 ================================================================================
-4. PHASE 2 : ANALYSE DE CORRÉLATION (correlation/)
+4. PHASE 2 : VÉRIFICATION FUITE DE DONNÉES (data_leakage_checkup/) - NOUVEAU
+================================================================================
+
+Vérification automatique de l'absence de fuite de données temporelles.
+
+Méthodologie :
+- Validation de l'ordre temporel (ticker, date)
+- Vérification que les features utilisent uniquement des données passées
+- Tests automatisés de non-contamination entre train/test
+- Alertes en cas de patterns suspects de fuite de données
+
+================================================================================
+5. PHASE 3 : ANALYSE DE CORRÉLATION (correlation/)
 ================================================================================
 
 Analyse optionnelle pour comprendre les relations entre features.
@@ -109,12 +138,12 @@ Méthodologie :
 - Aide à identifier les features redondantes ou complémentaires
 
 ================================================================================
-5. PHASE 3 : OPTIMISATION DES HYPERPARAMÈTRES (optimisation/)
+6. PHASE 4 : OPTIMISATION DES HYPERPARAMÈTRES (optimisation/)
 ================================================================================
 
 Recherche les meilleurs hyperparamètres LightGBM via optimisation bayésienne.
 
-5.1 ESPACE DE RECHERCHE
+6.1 ESPACE DE RECHERCHE
 ------------------------
 
 Paramètres optimisés :
@@ -201,7 +230,18 @@ SHAP (SHapley Additive exPlanations) explique les prédictions du modèle :
 - Plots haute résolution (300 DPI, 12x8 pouces)
 - Permet de comprendre quelles features le modèle utilise réellement
 
-7.3 COMPARAISON STATISTIQUE
+7.3 ANALYSE DE PERMUTATION (permutation/) - NOUVEAU
+---------------------------------------------------
+
+Méthode alternative d'importance des features basée sur la permutation.
+
+Méthodologie :
+- Permutation aléatoire des valeurs d'une feature
+- Mesure de la dégradation de performance du modèle
+- Features importantes = forte dégradation quand permutées
+- Complète l'analyse SHAP pour validation croisée
+
+7.4 COMPARAISON STATISTIQUE
 ----------------------------
 
 - Test de Diebold-Mariano entre paires de modèles
@@ -209,19 +249,13 @@ SHAP (SHapley Additive exPlanations) explique les prédictions du modèle :
 - Fournit p-values et significativité statistique
 - Permet de comparer rigoureusement les différentes variantes
 
-7.4 PARALLÉLISATION
--------------------
-
-- Évaluation simultanée de plusieurs modèles (2 workers)
-- Gestion de la mémoire avec garbage collection explicite
-
 ================================================================================
-8. BASELINE RANDOM (baseline/)
+9. PHASE 8 : BASELINE RANDOM (baseline/)
 ================================================================================
 
 Modèle de référence minimal pour établir un niveau de performance de base.
 
-8.1 OBJECTIF
+9.1 OBJECTIF
 ------------
 
 La baseline random génère des prédictions aléatoires à partir de la même
@@ -230,7 +264,7 @@ distribution statistique que les données de test, permettant de :
 - Vérifier que les modèles LightGBM apportent une valeur ajoutée
 - Fournir un point de comparaison pour les métriques
 
-8.2 MÉTHODOLOGIE
+9.2 MÉTHODOLOGIE
 ----------------
 
 a) Chargement des données de test
@@ -252,7 +286,7 @@ d) Sauvegarde des résultats
    - Ajout dans le même fichier JSON (results.json)
    - Clé "random_baseline" pour identification
 
-8.3 CARACTÉRISTIQUES
+9.3 CARACTÉRISTIQUES
 ---------------------
 
 - Aucune feature utilisée (n_features = 0)
@@ -260,7 +294,7 @@ d) Sauvegarde des résultats
 - Prédictions purement aléatoires (pas d'apprentissage)
 - Performance attendue : R² proche de 0 ou négatif
 
-8.4 UTILISATION
+9.4 UTILISATION
 ---------------
 
 Commande pour exécuter la baseline :
@@ -303,9 +337,9 @@ Mesures critiques pour garantir l'intégrité temporelle :
 10. QUESTIONS DE RECHERCHE ET EXPÉRIENCES
 ================================================================================
 
-Les 5 variantes de datasets permettent de répondre à :
+Les 7 variantes de datasets permettent de répondre à :
 
-1. Les insights GARCH améliorent-ils les prédictions ?
+1. Les insights GARCH/ARIMA améliorent-ils les prédictions ?
    → Comparer : COMPLET vs SANS INSIGHTS
 
 2. Quelle valeur ajoutent les indicateurs techniques ?
@@ -314,11 +348,17 @@ Les 5 variantes de datasets permettent de répondre à :
 3. La volatilité est-elle prédictible uniquement via son historique ?
    → Évaluer : LOG VOLATILITY SEULEMENT
 
-4. Les insights GARCH seuls suffisent-ils ?
+4. Les insights économétriques seuls suffisent-ils ?
    → Évaluer : INSIGHTS SEULEMENT
 
-5. Quelles features sont les plus importantes ?
-   → Analyser : Classements d'importance SHAP
+5. L'effet des lags de target est-il significatif ?
+   → Comparer : datasets avec/sans lags de target
+
+6. Quelles features sont les plus importantes ?
+   → Analyser : Classements SHAP + permutation importance
+
+7. Les modèles apportent-ils une vraie valeur ajoutée ?
+   → Comparer avec : BASELINE RANDOM
 
 ================================================================================
 11. POINTS D'ENTRÉE ET EXÉCUTION
@@ -329,19 +369,25 @@ Commandes pour exécuter le pipeline complet :
 # 1. Préparer les datasets (obligatoire en premier)
 python -m src.lightgbm.data_preparation.main
 
-# 2. Analyser les corrélations (optionnel)
+# 2. Vérifier l'absence de fuite de données (recommandé)
+python -m src.lightgbm.data_leakage_checkup.main
+
+# 3. Analyser les corrélations (optionnel)
 python -m src.lightgbm.correlation.main
 
-# 3. Optimiser les hyperparamètres
+# 4. Optimiser les hyperparamètres
 python -m src.lightgbm.optimisation.main
 
-# 4. Entraîner les modèles avec paramètres optimisés
+# 5. Entraîner les modèles avec paramètres optimisés
 python -m src.lightgbm.training.main
 
-# 5. Évaluer sur le set de test
+# 6. Évaluer sur le set de test
 python -m src.lightgbm.eval.main
 
-# 6. Calculer la baseline random (optionnel, pour comparaison)
+# 7. Analyser l'importance par permutation (optionnel)
+python -m src.lightgbm.permutation.main
+
+# 8. Calculer la baseline random (optionnel, pour comparaison)
 python -m src.lightgbm.baseline.main
 
 Chaque étape est indépendante après la préparation des données, permettant
