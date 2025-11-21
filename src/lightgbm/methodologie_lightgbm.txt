@@ -1,0 +1,174 @@
+# MÉTHODOLOGIE - PIPELINE LIGHTGBM
+
+## Objectif
+Prédiction volatilité logarithmique S&P 500 (J+1) via gradient boosting avec études d'ablation pour tester apport ARIMA-GARCH.
+
+## Question de recherche
+Les features ARIMA-GARCH améliorent-elles la prévision volatilité vs indicateurs techniques seuls?
+
+## Pipeline (8 modules)
+
+### 1. data_preparation/
+**Objectif**: Feature engineering + 7 variants datasets (ablation studies)
+
+**Features techniques**:
+- Volume: log_volume, log_volume_rel_ma_5, log_volume_zscore_20
+- Returns: log_return, abs_ret, ret_sq
+- Momentum: OBV, ATR (14j)
+- Turnover: log_turnover, turnover_rel_ma_5
+- Calendrier: day_of_week, month, is_month_end (pas laggés)
+- Lags: 1, 2, 3 jours (toutes features techniques)
+
+**Features ARIMA-GARCH**:
+- log_sigma_garch (de data_tickers_full_insights.parquet)
+
+**Target**: log_volatility (log variance réalisée)
+
+**7 variants datasets**:
+1. **Complete**: Toutes features (technical + insights + target lags)
+2. **Without Insights**: Technical + target lags (pas ARIMA-GARCH)
+3. **Without Sigma2**: Complete - sigma2_garch
+4. **Sigma Plus Base**: Seulement GARCH σ² + log_volatility + lags
+5. **Log Volatility Only**: Target + lags (baseline autorégressif)
+6. **Technical Only (no target lags)**: Technical seulement
+7. **Technical + Insights (no target lags)**: Technical + ARIMA-GARCH
+
+**Anti-leakage**:
+- Features à t utilisent données ≤ t-1 uniquement
+- Moving averages: backward-looking
+- Target t+1 prédit depuis features t
+- Suppression (window_size-1) premières obs TEST (contamination fenêtres)
+
+**Outputs**: 7 CSV files dans `data/`
+
+### 2. correlation/
+**Objectif**: Analyse corrélations + multicolinéarité
+**Outputs**: Heatmaps corrélation (`plots/lightgbm/correlation/`)
+
+### 3. optimisation/
+**Objectif**: Tuning hyperparamètres (Optuna)
+
+**Workflow**:
+- 50% TRAIN data (vitesse)
+- TimeSeriesSplit CV (5 splits)
+- 5 trials par dataset (configurable)
+- Objectif: Minimiser RMSE validation fold
+
+**Search space**:
+- num_leaves: [10, 200]
+- learning_rate: [0.001, 0.3]
+- n_estimators: [50, 1000]
+- min_child_samples: [5, 100]
+- subsample: [0.5, 1.0]
+- colsample_bytree: [0.5, 1.0]
+- reg_alpha/lambda: [0, 10]
+
+**Output**: `results/lightgbm/optimization/results.json`
+
+### 4. training/
+**Objectif**: Entraînement modèles sur TRAIN complet (80%)
+
+**Workflow**:
+1. Load hyperparamètres optimisés
+2. Train sur tous variants datasets
+3. Sauvegarder modèles: `results/lightgbm/models/{dataset}.pkl`
+
+**Config LightGBM**:
+- Objective: regression (log_volatility continu)
+- Metric: RMSE
+- Random state: 42 (reproductibilité)
+
+**Output**: `results/lightgbm/models/*.pkl`
+
+### 5. eval/
+**Objectif**: Évaluation TEST (20%) + interprétabilité
+
+**Workflow**:
+1. Prédictions sur TEST
+2. Métriques: RMSE, MAE, R², MSE
+3. SHAP analysis (TreeExplainer):
+   - Feature importance (mean |SHAP|)
+   - Beeswarm plots (distribution impacts)
+   - Dependence plots (interactions)
+4. Comparaisons statistiques:
+   - Diebold-Mariano test (forecast accuracy)
+   - Wilcoxon signed-rank
+
+**Outputs**:
+- `results/lightgbm/evaluation/results.json`: Métriques TEST
+- `plots/lightgbm/shap/*.png`: SHAP plots
+- Comparaisons statistiques
+
+### 6. data_leakage_checkup/
+**Objectif**: Validation anti-leakage automatisée
+
+**Tests**:
+1. Ordre temporel: Features t n'utilisent pas données t+1
+2. R² threshold: Prédiction target futur depuis features actuelles (R²>0.1 = suspect)
+3. Lag alignment: Vérification shifts corrects
+4. Date consistency: Split chronologique maintenu
+
+**Output**: `results/lightgbm/evaluation/leakage_test_results.json`
+
+### 7. baseline/
+**Objectif**: Modèles naïfs pour comparaison
+
+**Baselines**:
+- Persistence: y_{t+1} = y_t
+- Mean: y_{t+1} = mean(y_train)
+- Random walk: y_{t+1} = y_t + noise
+
+**Output**: Baseline RMSE/MAE
+
+### 8. permutation/
+**Objectif**: Feature importance (model-agnostic)
+
+**Méthode**:
+1. Baseline TEST performance
+2. Pour chaque feature:
+   - Permuter valeurs (break relation avec target)
+   - Re-calculer performance
+   - Importance = drop performance
+3. 200 répétitions (stabilité)
+
+**Config**:
+- Block size: 20 (temporal blocks)
+- Sample: 30% TEST data (vitesse)
+
+**Outputs**:
+- `results/lightgbm/evaluation/permutation_importance.json`
+- `plots/lightgbm/permutation/*.png`
+
+## Safeguards Anti-Leakage
+
+**Feature engineering**:
+- Features t: données ≤ t-1 uniquement
+- Lags: proper shifting (pas index misalignment)
+
+**Split train/test**:
+- 80/20 chronologique strict
+- TRAIN: dates antérieures, TEST: dates postérieures
+
+**Cross-validation**:
+- TimeSeriesSplit (ordre temporel respecté)
+- PAS KFold (shufflerait)
+
+**Optimisation**:
+- TRAIN split uniquement
+- TEST jamais visible pendant Optuna
+
+**Tests automatisés**:
+- R² threshold (détection leakage)
+- Temporal order checks
+
+## Exécution
+```bash
+python src/lightgbm/data_preparation/main.py
+python src/lightgbm/correlation/main.py
+python src/lightgbm/optimisation/main.py
+python src/lightgbm/training/main.py
+python src/lightgbm/eval/main.py
+python src/lightgbm/data_leakage_checkup/main.py
+python src/lightgbm/baseline/main.py
+python src/lightgbm/permutation/main.py
+```
