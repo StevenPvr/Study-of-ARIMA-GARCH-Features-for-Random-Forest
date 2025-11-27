@@ -30,6 +30,8 @@ DATA_TICKERS_FULL_INDICATORS_FILE = DATA_DIR / "data_tickers_full_indicators.par
 DATA_TICKERS_FULL_INSIGHTS_INDICATORS_FILE = (
     DATA_DIR / "data_tickers_full_insights_indicators.parquet"
 )
+LABEL_PRIMAIRE_SOURCE_PARQUET = DATA_DIR / "label_primaire.parquet"
+LABEL_PRIMAIRE_SOURCE_CSV = DATA_DIR / "label_primaire.csv"
 WEIGHTED_LOG_RETURNS_FILE = DATA_DIR / "weighted_log_returns.csv"
 WEIGHTED_LOG_RETURNS_SPLIT_FILE = DATA_DIR / "weighted_log_returns_split.csv"
 LABEL_PRIMAIRE_LABELED_DATA_FILE = DATA_DIR / "label_primaire_with_labels.parquet"
@@ -52,6 +54,11 @@ LIGHTGBM_DATASET_TECHNICAL_ONLY_NO_TARGET_LAGS_FILE = (
 LIGHTGBM_DATASET_TECHNICAL_PLUS_INSIGHTS_NO_TARGET_LAGS_FILE = (
     DATA_DIR / "lightgbm_dataset_technical_plus_insights_no_target_lags.csv"
 )
+
+# Label primaire outputs
+LABEL_PRIMAIRE_RESULTS_DIR = RESULTS_DIR / "label_primaire"
+LABEL_PRIMAIRE_OUTPUT_PARQUET = LABEL_PRIMAIRE_RESULTS_DIR / "label_primaire_labels.parquet"
+LABEL_PRIMAIRE_OUTPUT_CSV = LABEL_PRIMAIRE_RESULTS_DIR / "label_primaire_labels.csv"
 
 # ============================================================================
 # RESULTS DIRECTORIES - Organized by pipeline step/model
